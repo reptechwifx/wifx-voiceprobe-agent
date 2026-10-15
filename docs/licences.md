@@ -5,3 +5,5 @@ Sources originales WIFX Agent/outillage : GPL-3.0-or-later. Le Controller privé
 La Release fournit les sources PJSIP, Python/NumPy/OpenBLAS et les sources Debian correspondant aux bibliothèques de l’image, avec inventaire et empreintes. Les sources Agent sont celles du tag/commit public indiqué dans le manifeste signé. Les recettes de compilation et de transformation sont dans scripts/.
 
 Le wheel NumPy WIFX conserve ses algorithmes ; il retire ses deux runtimes Fortran/quadmath vendus et les remplace par les bibliothèques système déclarées. WIFX-PROVENANCE.json trace l’original et les modifications. Le client ne compile rien.
+
+Les sources tierces originales comportent des fixtures de clés déjà publiques pour leurs tests ; leur redistribution inchangée est autorisée par WIFX. Elles ne constituent pas des identités Agent, credentials SIP ou secrets de signature. Le rapport de publication distingue ces fixtures des constantes publiques d’autotest éventuellement intégrées aux bibliothèques système. Aucune clé de production WIFX ne fait partie de la distribution.
