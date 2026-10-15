@@ -1,7 +1,13 @@
 # Docker Linux AMD64
 
-Docker local actif et accès administrateur au socket Unix. Aucun registry privé ou GHCR n’est requis : l’archive Agent seule est téléchargée depuis GitHub, vérifiée puis importée par ID immuable. Aucun pull implicite.
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- --backend docker
+```
 
-L’installateur crée seulement l’Agent concerné, utilise le réseau host pour SIP/RTP, vérifie les ports et conserve un répertoire persistant dédié. Il fonctionne même sans Compose. Le conteneur a un healthcheck, unless-stopped et des privilèges réduits ; l’outil d’administration exige les droits Docker locaux.
+Docker actif, curl et OpenSSL ; aucun Registry privé ni Compose requis. Image Agent seule importée depuis GitHub et vérifiée par identités immuables. Réseau host, données persistantes dédiées et restart unless-stopped.
 
-Plusieurs instances utilisent --instance NOM et des ports distincts. Aucun conteneur homonyme inconnu n’est remplacé. Le profil Compose est une référence facultative pour les administrateurs ; le parcours standard automatise la configuration sans commande Compose préalable.
+Droits sudo ou session root autorisée (omettre sudo dans ce dernier cas), terminal SSH et accès HTTPS requis. La distribution est sélectionnée et vérifiée automatiquement ; aucune compilation sur la cible. Conserver l’URL locale et les identifiants affichés après le succès vérifié, puis adopter l’Agent dans le Controller.
+
+Mise à jour : `sudo voiceprobe-agent-docker update`. Pour plusieurs instances : dossiers et ports distincts, puis `--instance NOM`. Le conteneur reste gérable depuis Container Manager.
+
+[Résultats et limites](qualification-1.0.0.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).

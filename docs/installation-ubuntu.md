@@ -1,5 +1,13 @@
-# Ubuntu24.04 AMD64
+# Ubuntu 24.04 AMD64
 
-Python3.12, systemd actif, accès HTTPS public et au Controller, APT fonctionnel, espace pour préparer une release et conserver sauvegarde/rollback. PJSIP2.16 est livré pour cette ABI uniquement. Ubuntu22 et ARM64 non qualifiés.
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh
+```
 
-La commande officielle sera dans le tableau du README après qualification publique. Après succès, ouvrir l’URL locale affichée, se connecter avec admin et le mot de passe remis sur le terminal puis adopter l’Agent dans le Controller. Ne pas enregistrer cette remise des identifiants. Aucun token d’enrôlement à recopier.
+Python3.12/ABIcp312 et glibc2.39. Ubuntu22.04 est refusé faute de qualification.
+
+Droits sudo ou session root autorisée (omettre sudo dans ce dernier cas), terminal SSH et accès HTTPS requis. La distribution est sélectionnée et vérifiée automatiquement ; aucune compilation sur la cible. Conserver l’URL locale et les identifiants affichés après le succès vérifié, puis adopter l’Agent dans le Controller.
+
+Mise à jour : `sudo voiceprobe-agent update`. Identité, adoption, comptes SIP, identifiants et historique sont conservés. Service systemd actif au boot.
+
+[Résultats et limites](qualification-1.0.0.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).

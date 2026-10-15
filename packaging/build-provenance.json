@@ -1,0 +1,30 @@
+{
+  "agent_version": "0.9-004",
+  "installer_version": "1.0.0",
+  "public_source_revision": "d9b46ac98af1e4bd8e3339a860b00bebd59ffe8e",
+  "architecture": "linux/amd64",
+  "base_image_immutable_reference": "debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587",
+  "base_rootfs_diff_ids": [
+    "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7"
+  ],
+  "agent_image_ids": [
+    "sha256:572e258d64109b3ab8f7470ba4a0a757ac9a5e2c3e757188f765c5bcb4a4c6a0",
+    "sha256:dcff0689cacf0e4c59e2f229c19c04191f010038cd89c622c67b80e9aaa469e4"
+  ],
+  "agent_rootfs_diff_ids": [
+    "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
+    "sha256:1c9ac609ac753b2fae3426b10da2eb68eb65771256d7a46c529dc237e365fbb8",
+    "sha256:fb8e6d0ebbcb1b2fc84a6b5ba35769c6e0ec0f18dc813249af181d448ea73193",
+    "sha256:6ff6147cdbdc0bc7719d743d801e5a4b56bc6857ffbf5751e0c72cd5079089f2",
+    "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+    "sha256:5078de4931103be7afc066b75550347102dc53e5737f4056fe38d5100a5bfcce"
+  ],
+  "runtime_sdk_sha256": {
+    "ubuntu-24.04-amd64-cp312": "6a05721dc277650fba1ec9f248ed0f8227922c181ecfa0adffe9400e350f0ef7",
+    "debian-12-amd64-cp311": "a4ebe371e51ce280bf9d09073fd4664c42658e9dfb1b0d3ca97c3369652aba4f"
+  },
+  "corresponding_sources_sha256": "707461acf9b3d00c27d2e3adb186f540f362329afe5c00b04125ffb5342b8cce",
+  "binary_package_inventory": "debian-reference-inventory.json",
+  "construction": "local controlled build; no Actions or remote runner",
+  "reproducibility_scope": "Exact published bytes verified by signatures and SHA256; rebuild recipe and sources supplied. Bit-for-bit image rebuild across different APT repository states is not claimed."
+}

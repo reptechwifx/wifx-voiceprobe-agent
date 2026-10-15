@@ -1,7 +1,13 @@
 # Synology Intel AMD64
 
-DSM avec Container Manager/Docker, curl et OpenSSL. Le bootstrap détecte Docker dans PATH ou les chemins connus des paquets DSM et choisit un volume /volumeN accessible ; --data-root permet un dossier dédié explicite. Python/systemd ne sont pas requis sur DSM.
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- --backend docker
+```
 
-Le réseau host est le profil SIP/RTP qualifié en fixture. Aucun mapping bridge n’est présenté comme preuve RTP. Aucun pare-feu DSM global n’est modifié. Le conteneur reste visible dans Container Manager et ses données survivent aux mises à jour.
+DSM avec Container Manager/Docker, curl et OpenSSL. Le bootstrap cherche Docker dans PATH et les chemins des paquets DSM ; choisit un volume /volumeN accessible. Pas de Python/systemd natif requis. Profil logiciel BusyBox/DSM qualifié ; aucun NAS physique ni IPv6 DSM réel qualifié. Aucun pare-feu global n’est modifié.
 
-La qualification est logicielle représentative ; aucun NAS physique ou routage IPv6 DSM réel n’est qualifié. ARM64 n’est pas supporté par ces binaires.
+Droits sudo ou session root autorisée (omettre sudo dans ce dernier cas), terminal SSH et accès HTTPS requis. La distribution est sélectionnée et vérifiée automatiquement ; aucune compilation sur la cible. Conserver l’URL locale et les identifiants affichés après le succès vérifié, puis adopter l’Agent dans le Controller.
+
+Mise à jour : `sudo voiceprobe-agent-docker update`. Pour plusieurs instances : dossiers et ports distincts, puis `--instance NOM`. Le conteneur reste gérable depuis Container Manager.
+
+[Résultats et limites](qualification-1.0.0.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).

@@ -1,5 +1,13 @@
-# Debian12 AMD64
+# Debian 12 AMD64
 
-Python3.11 et systemd actifs, APT fonctionnel, HTTPS public et Controller accessibles. Le binaire Python3.12 n’est jamais utilisé sur cette cible. Les dépendances sont binaires ; aucune compilation PJSIP ou SWIG.
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh
+```
 
-La commande officielle sera dans le tableau du README après qualification publique. Les données restent dans /var/lib/voiceprobe et les releases remplaçables dans /opt/voiceprobe. La relance conserve l’identité ; une mise à jour ne réinitialise pas l’administrateur.
+Python3.11/ABIcp311 et glibc2.36. Ne pas réutiliser un binaire Python3.12.
+
+Droits sudo ou session root autorisée (omettre sudo dans ce dernier cas), terminal SSH et accès HTTPS requis. La distribution est sélectionnée et vérifiée automatiquement ; aucune compilation sur la cible. Conserver l’URL locale et les identifiants affichés après le succès vérifié, puis adopter l’Agent dans le Controller.
+
+Mise à jour : `sudo voiceprobe-agent update`. Identité, adoption, comptes SIP, identifiants et historique sont conservés. Service systemd actif au boot.
+
+[Résultats et limites](qualification-1.0.0.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).
