@@ -6,7 +6,7 @@ root = Path(SPECPATH).parent.parent
 sdk = Path(os.environ['VOICEPROBE_WINDOWS_SDK'])
 trust = Path(os.environ['VOICEPROBE_WINDOWS_TRUST'])
 qa = os.environ.get('VOICEPROBE_WINDOWS_CONSOLE') == '1'
-data = [(str(root/'VERSION'), '.'), (str(root/'agent/windows/assets'), 'assets'), (str(trust/'provisioning-public.pem'), '.'), (str(trust/'build-trust.json'), '.')]
+data = [(str(root/'agent/VERSION'), '.'), (str(root/'agent/windows/assets'), 'assets'), (str(trust/'provisioning-public.pem'), '.'), (str(trust/'build-trust.json'), '.')]
 if (trust/'lab-ca.crt').is_file():
     data.append((str(trust/'lab-ca.crt'), '.'))
 a = Analysis([str(root/'agent/windows/portable-entry.py')],

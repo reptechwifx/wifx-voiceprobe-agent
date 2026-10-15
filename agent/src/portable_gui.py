@@ -294,7 +294,7 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
             styles[values[key]] = (tone, tone if tone in backgrounds else 'white')
             user.SetWindowTextW(values[key], text)
         user.SetWindowTextW(controls['ticket'], ticket_title(view))
-        user.SetWindowTextW(controls['version'], 'Agent ' + str(view.get('version', ''))[:32] + (' · LAB non signé' if lab else ''))
+        user.SetWindowTextW(controls['version'], 'Agent ' + str(view.get('version', ''))[:32] + (' · VERSION DE TEST — NON SIGNÉE AUTHENTICODE' if lab else ''))
         user.SetWindowTextW(controls['error'], str(view.get('diagnostic_message') or view.get('error') or '')[:150])
         title, message, tone = client_notice(view, closing=state['closing'])
         styles[controls['notice_title']] = (tone, 'white')

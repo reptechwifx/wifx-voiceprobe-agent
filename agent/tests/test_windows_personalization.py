@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 WINDOWS = Path(__file__).resolve().parents[1] / 'windows'
 sys.path.insert(0, str(WINDOWS))
@@ -189,8 +190,10 @@ class WorkerTests(unittest.TestCase):
         (self.root/'provisioning-public.pem').write_bytes(self.pem)
         spec=importlib.util.spec_from_file_location('entry_binding',WINDOWS/'portable-entry.py')
         entry=importlib.util.module_from_spec(spec);spec.loader.exec_module(entry)
+        # This fixture deliberately represents a signed legacy 0.9-004 package.
         policy={'qualification':'lab','provisioning_key_sha256':self.key_id}
-        provision=entry.load_integrated_provision(self.root,self.root/'output/WIFX-VoiceProbe.exe',policy)
+        with patch('version.VERSION','0.9-004'):
+            provision=entry.load_integrated_provision(self.root,self.root/'output/WIFX-VoiceProbe.exe',policy)
         self.assertEqual(provision['artifact_template_sha256'],self.digest)
         self.assertEqual(provision['mode'],'persistent')
         policy['provisioning_key_sha256']='0'*64

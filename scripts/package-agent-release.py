@@ -13,6 +13,7 @@ import shlex
 import subprocess
 import tarfile
 import time
+import tempfile
 import urllib.parse
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -102,6 +103,16 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=4 CMD ["pyt
 ENTRYPOINT ["python3","/opt/voiceprobe/scripts/container-entrypoint.py"]
 CMD ["python3","agent/src/main.py"]
 '''
+    if args.runtime_release:
+        previous=json.loads(args.runtime_release.read_text())
+        public=run(['openssl','pkey','-in',str(args.signing_key),'-pubout'])
+        with tempfile.TemporaryDirectory(prefix='voiceprobe-runtime-root-') as tmp:
+            pub=Path(tmp)/'public.pem';pub.write_bytes(public)
+            subprocess.run(['openssl','dgst','-sha256','-verify',str(pub),'-signature',str(args.runtime_release.with_suffix('.sig')),str(args.runtime_release)],check=True,stdout=subprocess.DEVNULL)
+        base_ref=previous['docker']['reference']
+        base=json.loads(run(['docker','image','inspect',base_ref]))[0]
+        if base['Id'] not in previous['docker']['image_ids'] or base['RootFS']['Layers']!=previous['docker']['rootfs_diff_ids'] or base['Architecture']!='amd64' or base['Config']['Labels'].get('net.wifx.project')!='voiceprobe-agent':raise ValueError('Image Agent de référence non qualifiée.')
+        dockerfile='FROM '+base['Id']+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
     (context/'Dockerfile').write_text(dockerfile)
     docker=['docker','--host','unix:///var/run/docker.sock']
     if json.loads(run(docker+['info','--format','{{json .}}']))['Name']!='docker-desktop':raise ValueError('Construction exclusivement Docker Desktop Marc-Home.')
@@ -120,9 +131,9 @@ CMD ["python3","agent/src/main.py"]
     tar.unlink()
     compatibility=json.loads((ROOT/'agent/installer/compatibility.json').read_text())
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
-    manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.0','sequence':args.sequence,'expires':int(time.time())+90*86400,
+    manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.1','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':dirty,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':['0.9-003','0.9-004'],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':['0.9-003','0.9-004','0.9-007'],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:
@@ -146,6 +157,6 @@ CMD ["python3","agent/src/main.py"]
     print(json.dumps({'release_id':release_id,'source_revision':revision,'development':dirty,'output':str(out),'image':ref,'sha256':sha(out/'release.json')}))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--lab-development',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
     try:pack(a)
     except (ValueError,subprocess.CalledProcessError):raise SystemExit('Construction de distribution Agent refusée ; aucun upload effectué.') from None

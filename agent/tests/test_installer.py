@@ -394,3 +394,16 @@ class LauncherCoexistence(unittest.TestCase):
             with patch.object(m,'Path',side_effect=lambda value:root/'bin'/Path(value).name):
                 with self.assertRaises(m.Failure):manager.install_command(source)
             self.assertEqual('# foreign\n',alias.read_text())
+
+
+class IncomingRollbackCompatibility(unittest.TestCase):
+    def test_legacy_binary_is_not_started_with_an_autonomous_report_still_pending(self):
+        with tempfile.TemporaryDirectory() as folder:
+            manager=m.Manager.__new__(m.Manager);manager.data=Path(folder)
+            with sqlite3.connect(manager.data/'state.sqlite') as db:
+                db.execute('CREATE TABLE reports(run_id TEXT,payload TEXT)')
+                db.execute('INSERT INTO reports VALUES (?,?)',('synthetic',json.dumps({'incoming':{'correlation':'unrecognized'}})))
+            with self.assertRaisesRegex(m.Failure,'Rapports entrants non synchronisés'):
+                manager.assert_legacy_rollback_reports({'version':'0.9-004'})
+            with sqlite3.connect(manager.data/'state.sqlite') as db:db.execute('DELETE FROM reports')
+            manager.assert_legacy_rollback_reports({'version':'0.9-004'})

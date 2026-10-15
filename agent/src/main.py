@@ -3,7 +3,7 @@
 import asyncio, gc, json, os, pathlib, platform, queue, re, signal, socket, sqlite3, ssl, threading, time, uuid
 import requests, websockets, pjsua2 as pj
 from audio import reference, analyze, analyze_echo, observe_audio
-from incoming import correlate, trusted_pbx_addresses
+from incoming import correlate, trusted_pbx_addresses, reception_status, outgoing_allowed
 from sdp import constrain_audio
 from localweb import build_server
 from version import VERSION, DISPLAY_VERSION, BUILD_ID
@@ -47,6 +47,9 @@ class ProbeCall(pj.Call):
         self.run_id = run_id
         self.duration = duration
         self.created = time.monotonic()
+        self.incoming = None
+        self.answer_at = None
+        self.audio_profile = account.config.get("audio_profile", "tone-1000")
         self.destination = None
         self.started = None
         self.finished = False
@@ -98,14 +101,18 @@ class ProbeCall(pj.Call):
 
     def onCallMediaState(self, prm):
         try:
-            if self.player is not None:
+            if self.media is not None:
                 return
             self.media = self.getAudioMedia(-1)
-            self.player = pj.AudioMediaPlayer()
-            self.player.createPlayer(str(self.agent.echo_tone if self.scenario_type == "echo" else self.agent.tone))
+            if self.audio_profile == "echo":
+                self.media.startTransmit(self.media)
+            else:
+                self.player = pj.AudioMediaPlayer()
+                self.player.createPlayer(str(self.agent.echo_tone if self.scenario_type == "echo" else self.agent.tone))
             self.recorder = pj.AudioMediaRecorder()
             self.recorder.createRecorder(str(self.recording))
-            self.player.startTransmit(self.media)
+            if self.player is not None:
+                self.player.startTransmit(self.media)
             self.media.startTransmit(self.recorder)
         except pj.Error:
             self.events.append({"kind": "media_not_ready", "at": utc()})
@@ -278,6 +285,11 @@ class ProbeCall(pj.Call):
             sample_rate=(audio or {}).get("sample_rate"),
             interruptions_s=(audio or {}).get("interrupted_s"),
         )
+        if self.incoming is not None:
+            metrics["incoming"] = self.incoming
+            if metrics.get("audio") is not None:
+                metrics["audio"]["reference_available"] = False
+                metrics["audio"]["scope"] = "local_incoming"
         self.agent.pending_report(self.run_id, metrics)
         if audio is not None and self.recording.exists():
             self.recording.unlink()
@@ -293,7 +305,7 @@ class ProbeAccount(pj.Account):
         self.registration_code = 0
         self.registration_active = False
         self.registration_text = "Non enregistré"
-        self.trusted_sources = trusted_pbx_addresses(config["server"])
+        self.trusted_sources = set().union(*(trusted_pbx_addresses(config[k]) for k in ("server", "registrar", "proxy") if config.get(k)))
         self.registered_at = None
         self.registration_changed_at = utc()
 
@@ -314,25 +326,33 @@ class ProbeAccount(pj.Account):
         self.registration_active = active
         if self.registration_active:
             self.registered_at = utc()
+            self.trusted_sources = set().union(*(trusted_pbx_addresses(self.config[k]) for k in ("server", "registrar", "proxy") if self.config.get(k)))
 
     def onIncomingCall(self, prm):
         message = prm.rdata.wholeMsg
         source = str(prm.rdata.srcAddress).rsplit(":",1)[0].strip("[]")
-        run_id = correlate(self.agent.prepared, self.config["id"], message, source, self.trusted_sources) or ""
-        prep = self.agent.prepared.get(run_id)
-        call = ProbeCall(self, run_id, prep["duration_s"] if prep else 1, prm.callId)
+        matched = correlate(self.agent.prepared, self.config["id"], message, source, self.trusted_sources)
+        run_id = matched or str(uuid.uuid4())
+        prep = self.agent.prepared.get(matched)
+        call = ProbeCall(self, run_id, min(prep["duration_s"] if prep else self.config.get("max_duration_s", 300), self.config.get("max_duration_s", 300)), prm.callId)
         call.preferred = prep.get("preferred_codec") if prep else None
         call.destination = self.config["username"]
-        authorized = bool(prep)
         op = pj.CallOpParam()
-        op.statusCode = 200 if authorized and self.agent.capacity(self) else 403
-        if op.statusCode == 200:
+        op.statusCode = reception_status(self.config, (self.agent.remote or {}).get("mode", "standby"), source, self.trusted_sources, self.agent.capacity(self))
+        if op.statusCode == 180:
+            if not matched:
+                call.incoming = {"observed_at": utc(), "correlation": "unrecognized", "source": source}
+                with self.agent.lock:
+                    self.agent.db.execute("INSERT INTO incoming_active VALUES (?,?)", (run_id, json.dumps(call.incoming)))
+                    self.agent.db.commit()
             self.agent.calls[run_id] = call
-            self.agent.prepared.pop(run_id, None)
+            self.agent.prepared.pop(matched, None)
             self.agent.store_active(run_id)
+            call.answer_at = time.monotonic() + 1.0
         else:
             self.agent.rejected.append(call)
         call.answer(op)
+
 
 
 class Agent:
@@ -372,8 +392,9 @@ class Agent:
         )
         self.lock = threading.Lock()
         self.db.executescript(
-            "CREATE TABLE IF NOT EXISTS commands(id TEXT PRIMARY KEY,ok INTEGER,error TEXT,acked INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS reports(run_id TEXT PRIMARY KEY,payload TEXT);CREATE TABLE IF NOT EXISTS active(run_id TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS local_runs(run_id TEXT PRIMARY KEY,payload TEXT);"
+            "CREATE TABLE IF NOT EXISTS commands(id TEXT PRIMARY KEY,ok INTEGER,error TEXT,acked INTEGER DEFAULT 0);CREATE TABLE IF NOT EXISTS reports(run_id TEXT PRIMARY KEY,payload TEXT);CREATE TABLE IF NOT EXISTS active(run_id TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS local_runs(run_id TEXT PRIMARY KEY,payload TEXT);CREATE TABLE IF NOT EXISTS incoming_active(run_id TEXT PRIMARY KEY,payload TEXT);"
         )
+        self.db.execute("UPDATE commands SET acked=0 WHERE acked=2")
         self.db.commit()
         self.recent_runs = [
             json.loads(r[0])
@@ -384,6 +405,7 @@ class Agent:
         if (self.data / "state.sqlite").exists():
             os.chmod(self.data / "state.sqlite", 0o600)
         for row in self.db.execute("SELECT run_id FROM active").fetchall():
+            incoming_row = self.db.execute("SELECT payload FROM incoming_active WHERE run_id=?", (row[0],)).fetchone()
             self.pending_report(
                 row[0],
                 {
@@ -393,6 +415,7 @@ class Agent:
                     "rtp": {},
                     "audio": None,
                     "events": [{"kind": "process_restart", "at": utc()}],
+                    **({"incoming": json.loads(incoming_row[0])} if incoming_row else {}),
                 },
             )
         self.inbox = queue.Queue()
@@ -611,6 +634,8 @@ class Agent:
                 "audio_profiles": ["tone-1000"],
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
+                "automatic_incoming": True,
+                "destination_policy": "account-public-v1",
                 "max_calls": self.cfg["max_calls"],
                 "media_clock": 16000,
                 "process_call_ceiling": 128,
@@ -737,6 +762,7 @@ class Agent:
                 (run_id, json.dumps(metrics)),
             )
             self.db.execute("DELETE FROM active WHERE run_id=?", (run_id,))
+            self.db.execute("DELETE FROM incoming_active WHERE run_id=?", (run_id,))
             self.db.commit()
 
     def store_active(self, run_id):
@@ -864,7 +890,7 @@ class Agent:
             if self.db.execute("SELECT id FROM commands WHERE id=?", (cid,)).fetchone():
                 return
             self.db.execute(
-                "INSERT INTO commands(id,ok,error) VALUES (?,0,?)",
+                "INSERT INTO commands(id,ok,error,acked) VALUES (?,0,?,2)",
                 (cid, "Interrupted before command completion"),
             )
             self.db.commit()
@@ -878,28 +904,24 @@ class Agent:
             else:
                 account = self.accounts.get(payload["account_id"])
                 if not account or account.registration_code != 200 or not account.registration_active:
-                    raise ValueError("SIP account not registered")
+                    raise ValueError("Compte SIP non enregistré.")
                 if not self.capacity(account):
-                    raise ValueError("Capacity exhausted")
+                    raise ValueError("Capacité maximale atteinte.")
                 mode = (self.remote or {}).get("mode", "standby")
                 if (
                     payload.get("audio_profile") != "tone-1000"
                     or not 1 <= payload["duration_s"] <= min(300, account.config.get("max_duration_s",300))
                 ):
-                    raise ValueError("Unsupported profile or duration")
+                    raise ValueError("Profil audio ou durée incompatibles avec le compte SIP.")
                 if command["kind"] == "prepare":
                     if mode not in ("receiver", "bidirectional"):
-                        raise ValueError("Receiver mode disabled")
+                        raise ValueError("Réception désactivée sur cette sonde.")
                     self.prepared[rid] = payload | {"expires": time.monotonic() + 45}
                 elif command["kind"] == "call":
                     if mode not in ("caller", "bidirectional"):
-                        raise ValueError("Caller mode disabled")
-                    if (
-                        payload["destination"]
-                        not in account.config["allowed_destinations"]
-                        or payload["server"] != account.config["server"]
-                    ):
-                        raise ValueError("Destination prohibited")
+                        raise ValueError("Appels sortants désactivés sur cette sonde.")
+                    if not outgoing_allowed(account.config, payload):
+                        raise ValueError("Destination publique non autorisée ou compte en réception seule.")
                     if rid in self.calls:
                         raise ValueError("Duplicate execution")
                     call = ProbeCall(account, rid, payload["duration_s"])
@@ -932,14 +954,14 @@ class Agent:
                     call.makeCall(dest, op)
                 else:
                     raise ValueError("Unknown command")
-        except (ValueError, pj.Error):
+        except (ValueError, pj.Error) as rejected:
             ok = False
-            error = "Command rejected: configuration, registration, or capacity"
+            error = str(rejected)[:200] if isinstance(rejected, ValueError) else "Erreur du moteur SIP : code " + str(getattr(rejected, "status", "inconnu"))
             self.last_error = error
             self.journal.record("call", error, level="error", run_id=rid)
         with self.lock:
             self.db.execute(
-                "UPDATE commands SET ok=?,error=? WHERE id=?", (int(ok), error, cid)
+                "UPDATE commands SET ok=?,error=?,acked=0 WHERE id=?", (int(ok), error, cid)
             )
             self.db.commit()
 
@@ -1107,7 +1129,7 @@ class Agent:
                         self.inbox.put(("command", (generation, c)))
                 for rid, payload in reports:
                     r = self.api(
-                        "POST", "runs/" + rid + "/report", json=json.loads(payload)
+                        "POST", ("incoming/" if "incoming" in json.loads(payload) else "runs/") + rid + "/report", json=json.loads(payload)
                     )
                     r.raise_for_status()
                     with self.lock:
@@ -1255,6 +1277,14 @@ class Agent:
                     self.remote_fingerprint = None
                 now = time.monotonic()
                 for rid, call in list(self.calls.items()):
+                    if call.answer_at is not None and now >= call.answer_at and not call.finished:
+                        call.answer_at = None
+                        op = pj.CallOpParam()
+                        op.statusCode = 200
+                        if self.running and self.remote is not None:
+                            call.answer(op)
+                        else:
+                            call.hangup_safe()
                     if now - last_sample > 0.1:
                         call.sample()
                     if (

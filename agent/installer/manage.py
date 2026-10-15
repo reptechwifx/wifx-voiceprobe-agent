@@ -32,7 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-INSTALLER_VERSION = '1.0.0'
+INSTALLER_VERSION = '1.0.1'
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MIN_FREE = 512 * 1024 * 1024
 
@@ -972,6 +972,18 @@ exit 0
             if self.settings.get('previous'):self.verify_backup(self.settings['previous']['backup']);print('Dernière sauvegarde : INTÈGRE')
         return 'STATUS_OK'
 
+    def assert_legacy_rollback_reports(self, target):
+        if target.get('version') not in ('0.9-003','0.9-004'):return
+        path=self.data/'state.sqlite'
+        if not path.exists():return
+        need(not path.is_symlink(),'État SQLite symbolique : rollback refusé.')
+        try:
+            with sqlite3.connect('file:'+str(path)+'?mode=ro',uri=True,timeout=2) as db:
+                pending=db.execute("SELECT count(*) FROM reports WHERE payload LIKE '%\"incoming\"%'").fetchone()[0]
+            need(pending==0,'Rapports entrants non synchronisés : conserver la version actuelle et réessayer après reconnexion au Controller.')
+        except sqlite3.Error:
+            raise Failure('État des rapports illisible : version actuelle conservée.') from None
+
     def rollback(self):
         previous=self.settings.get('previous');need(previous and previous.get('backend'),'Aucune version précédente qualifiée disponible.')
         need(previous.get('release',{}).get('data_schema')==1 and self.settings['release'].get('rollback_compatible') is True,
@@ -981,7 +993,7 @@ exit 0
         state={'phase':'prepared','settings_before':json.loads(json.dumps(self.settings)),'previous':self.previous,'target':previous['release'],'operation':'rollback'}
         atomic(self.state_path,state)
         try:
-            self.drain(current);self.backend.stop();self.frozen=None
+            self.drain(current);self.assert_legacy_rollback_reports(previous['release']);self.backend.stop();self.frozen=None
             state['phase']='stopped';atomic(self.state_path,state)
             backup=self.backup();state.update({'phase':'backed_up','backup':str(backup)});atomic(self.state_path,state)
             started=time.time();self.backend.restore(previous['backend']);state['phase']='started';atomic(self.state_path,state)

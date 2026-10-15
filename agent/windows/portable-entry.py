@@ -158,7 +158,7 @@ def main():
             provision = load_integrated_provision(root, Path(sys.executable), policy)
             from portable_agent import PortableAgent
             ca = root / 'lab-ca.crt'
-            agent = PortableAgent(provision, ca_file=str(ca) if policy['qualification'] == 'lab' and ca.is_file() else None)
+            agent = PortableAgent(provision, ca_file=str(ca) if policy['qualification'] == 'lab' and ca.is_file() and provision['controller_url'] == policy.get('controller_url') else None)
             with state_lock:
                 holder['agent'] = agent
             if stopping.is_set():

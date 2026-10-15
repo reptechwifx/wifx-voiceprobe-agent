@@ -36,7 +36,7 @@ def main():
                     '--require-hashes', '--only-binary=:all:', '--disable-pip-version-check',
                     '-r', str(root/'agent/windows/requirements-build.lock')], check=True)
     def source_manifest():
-        sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').rglob('*')) + [root/'VERSION']
+        sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').rglob('*')) + [root/'agent/VERSION']
         sources = [f for f in sources if f.is_file() and f.name != 'gateway.py' and '__pycache__' not in f.parts]
         return {f.relative_to(root).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest() for f in sources}
     source_hashes = source_manifest()
