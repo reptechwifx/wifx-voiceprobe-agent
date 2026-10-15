@@ -7,9 +7,9 @@
 | Docker Linux AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 | Synology Intel AMD64¹ | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 
-**Windows portable x64 — 0.2.0-LAB, EN COURS DE QUALIFICATION.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
+**Windows portable x64 — 0.3.0-LAB, EN COURS DE QUALIFICATION.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
 
-Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-004 · installateurs 1.0.0 · PJSIP/PJSUA2 2.16 précompilé.**
+Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-007 · installateurs 1.0.1 · PJSIP/PJSUA2 2.16 précompilé.**
 
 ¹ Synology : profil logiciel BusyBox/Container Manager vérifié en laboratoire ; aucun NAS physique n’a été testé. L’architecture est Intel x86-64, jamais ARM. Les commandes ci-dessus sont interactives ; SSH avec terminal et droits sudo est requis. En session root autorisée, omettre `sudo`.
 
@@ -28,6 +28,9 @@ Après une nouvelle installation vérifiée, le terminal affiche directement l�
 Un succès exige le bilan `Installation terminée`, l’état ACTIF et `VOICEPROBE_AGENT_RESULT=VERIFIED_SUCCESS`. **Le code zéro du lanceur protecteur ne prouve pas un succès.** Une erreur affiche CONTROLLED_FAILURE ; ne pas ajouter un message « Exécution terminée » fondé seulement sur ce code. Le shell SSH/PuTTY reste protégé.
 
 ## SIP, audio et réseau
+
+Controller0.9-007 requis pour les nouvelles fonctions ; mettre à jour le Controller avant les Agents. Les comptes en mode « Appels sortants et entrants » répondent après environ une seconde, sans scénario préparé ni en-tête Voice Probe obligatoire. Tonalité1kHz par défaut, écho disponible. La corrélation reste facultative ; les appels inconnus ont leur propre rapport. Le compte possède une seule autorisation de destination : appels publics OUI/NON. Les destinations internes des scénarios sont utilisables sans whitelist manuelle. Les limites de durée/capacité, les organisations et les baux Windows restent appliqués.
+
 
 SIP UDP/TCP, G.722, PCMA et PCMU, télémétrie HTTPS/WSS, appels mono-sonde, écho et mesures RTP. Le réseau host Docker est le profil qualifié : un mapping de ports ne constitue pas une preuve RTP. L’interface locale écoute par défaut sur une IPv4 privée détectée, port18441/TCP. Aucun pare-feu global n’est modifié ; l’installation refuse les conflits de ports et ne stoppe aucune autre application. Les règles réseau locales et le NAT doivent permettre vos flux SIP/RTP.
 
@@ -58,7 +61,7 @@ Une interruption se reprend avec la même commande. Une perte du mot de passe n�
 
 ## Téléchargements, signatures et licences
 
-[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-004-installer-1.0.0) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-004-installer-1.0.0/SHA256SUMS) · [Qualification](docs/qualification-1.0.0.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
+[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-007-installer-1.0.1) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-007-installer-1.0.1/SHA256SUMS) · [Qualification](docs/qualification-1.0.0.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
 
 Les manifestes sont signés RSA4096/SHA256 avec une racine de production épinglée dans le bootstrap. Empreinte SPKI SHA-256 : `f65020bb2c6139ba381094533afa0a28fbf3b34f7d6203f2a140b9ce999fde55`. TLS protège le premier téléchargement officiel ; les signatures authentifient ensuite les catalogues et empreintes. Les séquences et expirations sont vérifiées. Les images sont des archives publiques importées automatiquement et vérifiées par identité immuable ; aucun GHCR/Registry privé client n’est requis.
 
