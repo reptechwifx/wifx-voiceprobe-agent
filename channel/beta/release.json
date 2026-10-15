@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "installer_protocol": 1,
+  "installer_version": "1.0.0",
+  "sequence": 2026101501,
+  "expires": 1799835317,
+  "version": "0.9-004",
+  "release_id": "0.9-004-d9b46ac98af1",
+  "source_revision": "d9b46ac98af1e4bd8e3339a860b00bebd59ffe8e",
+  "development": false,
+  "data_schema": 1,
+  "rollback_compatible": true,
+  "compatible_from": [
+    "0.9-003",
+    "0.9-004"
+  ],
+  "legacy_main_sha256": [
+    "4eb79eb3e132ca033689b75d06f559d9a012657ac0dfd14e5731b03b45a30a32"
+  ],
+  "manager": {
+    "name": "agent-manager-c23ff4fce77f.py",
+    "bytes": 86926,
+    "sha256": "c23ff4fce77f63ff7b0d27a867066a4ef84170097f67e9a4a6543601d29e765c"
+  },
+  "agent": {
+    "name": "voiceprobe-agent-0.9-004-d9b46ac98af1.tar.gz",
+    "bytes": 119090,
+    "sha256": "124d08329296fc676ae41a338abf690ec73ede36b505e0ff375f50ca49b4f6e1"
+  },
+  "runtimes": {
+    "ubuntu-24.04-amd64-cp312": {
+      "name": "ubuntu-24.04-amd64-cp312-6a05721dc277.tar.gz",
+      "bytes": 20079578,
+      "sha256": "6a05721dc277650fba1ec9f248ed0f8227922c181ecfa0adffe9400e350f0ef7",
+      "python": "3.12",
+      "soabi": "cpython-312-x86_64-linux-gnu",
+      "glibc": "2.39",
+      "dependencies": [
+        "python3",
+        "python3-venv",
+        "ca-certificates",
+        "openssl",
+        "iproute2",
+        "libopus0",
+        "libstdc++6",
+        "libgcc-s1",
+        "libgfortran5",
+        "libquadmath0",
+        "libssl3t64",
+        "libasound2t64"
+      ]
+    },
+    "debian-12-amd64-cp311": {
+      "name": "debian-12-amd64-cp311-a4ebe371e51c.tar.gz",
+      "bytes": 20328478,
+      "sha256": "a4ebe371e51ce280bf9d09073fd4664c42658e9dfb1b0d3ca97c3369652aba4f",
+      "python": "3.11",
+      "soabi": "cpython-311-x86_64-linux-gnu",
+      "glibc": "2.36",
+      "dependencies": [
+        "python3",
+        "python3-venv",
+        "ca-certificates",
+        "openssl",
+        "iproute2",
+        "libopus0",
+        "libstdc++6",
+        "libgcc-s1",
+        "libgfortran5",
+        "libquadmath0",
+        "libssl3",
+        "libasound2"
+      ]
+    }
+  },
+  "docker": {
+    "name": "voiceprobe-agent-image-0.9-004-d9b46ac98af1.tar.gz",
+    "bytes": 101968194,
+    "sha256": "eaadf72c9d074814e85c5b9516a2744bcaea27e6c87f79a17c866600ee54204d",
+    "reference": "voiceprobe-agent-runtime:0.9-004-d9b46ac98af1",
+    "image_ids": [
+      "sha256:572e258d64109b3ab8f7470ba4a0a757ac9a5e2c3e757188f765c5bcb4a4c6a0",
+      "sha256:dcff0689cacf0e4c59e2f229c19c04191f010038cd89c622c67b80e9aaa469e4"
+    ],
+    "rootfs_diff_ids": [
+      "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
+      "sha256:1c9ac609ac753b2fae3426b10da2eb68eb65771256d7a46c529dc237e365fbb8",
+      "sha256:fb8e6d0ebbcb1b2fc84a6b5ba35769c6e0ec0f18dc813249af181d448ea73193",
+      "sha256:6ff6147cdbdc0bc7719d743d801e5a4b56bc6857ffbf5751e0c72cd5079089f2",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:5078de4931103be7afc066b75550347102dc53e5737f4056fe38d5100a5bfcce"
+    ]
+  },
+  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-004-installer-1.0.0",
+  "corresponding_sources": [
+    {
+      "name": "corresponding-sources-agent-0.9-004.tar.gz",
+      "bytes": 412831908,
+      "sha256": "707461acf9b3d00c27d2e3adb186f540f362329afe5c00b04125ffb5342b8cce"
+    }
+  ]
+}
