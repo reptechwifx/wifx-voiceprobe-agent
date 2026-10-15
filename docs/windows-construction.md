@@ -135,3 +135,7 @@ Pour un paquet personnalisé privé, après fermeture de la sonde, le même EXE 
 ```
 
 Adapter uniquement le nom si le fichier a été renommé. Cette commande vérifie à nouveau le provisioning intégré et sa liaison au template autorisé, puis demande une confirmation native avec **Non par défaut**. Elle supprime seulement la clé CNG et la métadonnée HKCU de cette instance signée. Elle refuse une identité occupée, incorrecte ou absente ; elle ne crée jamais de clé pour effectuer ce nettoyage. Aucune recherche globale d’instances, aucun moteur SIP et aucune connexion réseau ne sont nécessaires. Les autres sondes restent intactes. Une annulation retourne 2 sans afficher de succès ; un refus retourne 1 ; seule une suppression confirmée réussie retourne 0. Fermer le programme ne supprime pas l’identité persistante : utiliser cette commande avant d’effacer le fichier si cette identité n’est plus utile.
+
+## Modèle 0.3.0-LAB
+
+Agent0.9-007 réutilise le SDK PJSUA2 2.16 et le protocole CNG précédents. Il ajoute la réponse entrante autonome et la politique SIP simplifiée. Le constructeur de paquet LAB reprend la version Agent dans l’audit correspondant à l’EXE. Le paquet universel reste un modèle à personnaliser par le worker autorisé, sans invitation ni credentials SIP. Un manifeste RSA4096 LAB authentifie les fichiers ; il ne fournit aucune signature Authenticode ni qualification commerciale. Aucun EXE personnalisé ou clé privée n’est publié ici.

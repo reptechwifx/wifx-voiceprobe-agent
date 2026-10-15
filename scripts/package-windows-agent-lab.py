@@ -84,9 +84,12 @@ def package(args):
         names.add(name.casefold())
         if re.search(rb'-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n]{24,}-----END ', path.read_bytes()):
             raise ValueError('Matériel de clé privée refusé.')
+    agent_version = proof.get('agent_version', '0.9-004')
+    if not isinstance(agent_version, str) or not re.fullmatch(r'\d+\.\d+-\d{3}', agent_version):
+        raise ValueError('Version Agent absente ou invalide dans l’audit qualifié.')
     args.output.mkdir(mode=0o700, parents=True)
     manifest = {'schema': 'wifx-windows-lab-distribution-v1', 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS',
-                'agent_version': '0.9-004', 'portable_version': portable_version, 'architecture': 'AMD64',
+                'agent_version': agent_version, 'portable_version': portable_version, 'architecture': 'AMD64',
                 'python': '3.13.16', 'pjsip': '2.16', 'authenticode': False,
                 'files': {name: {'sha256': sha(path), 'bytes': path.stat().st_size} for name, path in sorted(files.items())}}
     mf = args.output/'manifest.json';mf.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2)+'\n')
