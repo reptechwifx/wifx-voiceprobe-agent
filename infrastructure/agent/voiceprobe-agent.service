@@ -1,0 +1,26 @@
+[Unit]
+Description=WIFX Voice Probe SIP/RTP agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+[Service]
+Type=simple
+User=voiceprobe
+Group=voiceprobe
+WorkingDirectory=/opt/voiceprobe/current
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/voiceprobe/current/agent/src
+Environment=CONFIG_FILE=/var/lib/voiceprobe/config.json
+ExecStart=/opt/voiceprobe/venv/bin/python /opt/voiceprobe/current/agent/src/main.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/voiceprobe
+UMask=0077
+[Install]
+WantedBy=multi-user.target

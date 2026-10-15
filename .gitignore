@@ -1,0 +1,8 @@
+var/
+.env
+*.key
+*.pem
+!signing-public.pem
+*.crt
+agent/BUILD_ID
+__pycache__/

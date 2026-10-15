@@ -1,0 +1,24 @@
+# Référence avancée après préparation de la configuration par le bootstrap.
+services:
+  agent:
+    image: ${VP_AGENT_IMAGE_ID:?ID immuable qualifié et importé requis}
+    pull_policy: never
+    container_name: voiceprobe-agent-${VP_AGENT_INSTANCE:-default}
+    network_mode: host
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CONFIG_FILE: /var/lib/voiceprobe/config.json
+    volumes:
+      - type: bind
+        source: ${VP_AGENT_DATA:?Dossier persistant existant requis}
+        target: /var/lib/voiceprobe
+        bind: {create_host_path: false}
+    tmpfs: [/tmp:rw,nosuid,nodev,noexec,size=16777216]
+    labels:
+      net.wifx.project: voiceprobe-agent
+      net.wifx.instance: ${VP_AGENT_INSTANCE:-default}

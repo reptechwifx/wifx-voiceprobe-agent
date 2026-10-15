@@ -1,0 +1,7 @@
+.git
+var
+**/.env
+**/*.key
+**/*.pem
+**/*.crt
+**/__pycache__

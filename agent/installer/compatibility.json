@@ -1,0 +1,16 @@
+{
+  "data_schema": 1,
+  "pjsip_version": "2.16",
+  "legacy_native_main_sha256": [
+    "4eb79eb3e132ca033689b75d06f559d9a012657ac0dfd14e5731b03b45a30a32"
+  ],
+  "native_platforms": [
+    "ubuntu-24.04-amd64-cp312",
+    "debian-12-amd64-cp311"
+  ],
+  "unqualified": [
+    "ubuntu-22.04",
+    "arm64",
+    "physical-synology"
+  ]
+}
