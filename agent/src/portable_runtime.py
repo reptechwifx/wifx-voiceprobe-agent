@@ -1,7 +1,9 @@
 """Security policy for the portable Agent; no SIP engine or local HTTP server.
 
-The private identity, admission credential and SIP configuration stay in memory.
-CPython/OpenSSL cannot guarantee forensic erasure of immutable objects or swap.
+Ephemeral identity and live admission/SIP credentials stay in process memory.
+Persistent Windows identity uses non-exportable per-user CNG key storage; public
+identity metadata lives in HKCU. CPython/native libraries cannot guarantee
+forensic erasure of immutable objects, runtime copies or swap.
 """
 import base64
 import datetime
@@ -20,6 +22,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 SCHEMA = 'wifx-voiceprobe-portable-provisioning-v1'
+PERSISTENT_SCHEMA = 'wifx-voiceprobe-portable-provisioning-v2'
 MAX_DOCUMENT = 65536
 
 
@@ -70,7 +73,7 @@ def https_origin(value):
     return value.rstrip('/')
 
 
-def verify_provisioning(document, trusted_keys, *, agent_version, now=None):
+def verify_provisioning(document, trusted_keys, *, agent_version, now=None, expected_template_sha256=None, expected_package_nonce=None):
     """Verify against keys pinned in the EXE, never keys supplied by the package.
 
     ``trusted_keys`` maps SPKI SHA-256 fingerprints to public PEM bytes. The
@@ -96,7 +99,12 @@ def verify_provisioning(document, trusted_keys, *, agent_version, now=None):
     value = _json(raw)
     expected = {'schema', 'invitation_id', 'invitation_secret', 'controller_url', 'name',
                 'organization', 'site', 'expires_at', 'agent_version', 'mode'}
-    if set(value) != expected or value['schema'] != SCHEMA or value['mode'] != 'ephemeral':
+    persistent = value.get('schema') == PERSISTENT_SCHEMA and value.get('mode') == 'persistent'
+    if persistent:
+        expected |= {'instance_id', 'support_reference', 'client_name', 'starts_at',
+                     'operational_expires_at', 'invitation_expires_at', 'expected_agent_id',
+                     'expected_fingerprint', 'artifact_template_sha256', 'package_nonce'}
+    if set(value) != expected or not (persistent or value['schema'] == SCHEMA and value['mode'] == 'ephemeral'):
         raise PortableError('Format de préparation non pris en charge.')
     try:
         if str(uuid.UUID(value['invitation_id'])) != value['invitation_id']:
@@ -105,7 +113,7 @@ def verify_provisioning(document, trusted_keys, *, agent_version, now=None):
         if not isinstance(secret, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', secret):
             raise ValueError()
         expires = datetime.datetime.fromisoformat(value['expires_at'].replace('Z', '+00:00'))
-        if expires.tzinfo is None or expires.timestamp() <= (time.time() if now is None else now):
+        if expires.tzinfo is None or (not persistent and expires.timestamp() <= (time.time() if now is None else now)):
             raise ValueError()
         if value['agent_version'] != agent_version:
             raise ValueError()
@@ -114,8 +122,33 @@ def verify_provisioning(document, trusted_keys, *, agent_version, now=None):
                 raise ValueError()
         if not value['name'].strip():
             raise ValueError()
+        if persistent:
+            if str(uuid.UUID(value['instance_id'])) != value['instance_id']:
+                raise ValueError()
+            if not re.fullmatch(r'WSUP-[0-9]{1,7}', value['support_reference']):
+                raise ValueError()
+            if not isinstance(value['client_name'], str) or not 1 <= len(value['client_name']) <= 200:
+                raise ValueError()
+            if value['expires_at'] != value['invitation_expires_at']:
+                raise ValueError()
+            start, end = [datetime.datetime.fromisoformat(value[field].replace('Z', '+00:00'))
+                          for field in ('starts_at', 'operational_expires_at')]
+            if start.tzinfo is None or end.tzinfo is None or start >= end:
+                raise ValueError()
+            agent_id, fingerprint = value['expected_agent_id'], value['expected_fingerprint']
+            if (agent_id is None) != (fingerprint is None):
+                raise ValueError()
+            if agent_id is not None and (str(uuid.UUID(agent_id)) != agent_id or not re.fullmatch('[0-9a-f]{64}', fingerprint)):
+                raise ValueError()
+            if any(not isinstance(value[field], str) or not re.fullmatch('[0-9a-f]{64}', value[field])
+                   for field in ('artifact_template_sha256', 'package_nonce')):
+                raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise PortableError('Préparation expirée, incompatible ou incomplète.') from None
+    if persistent and (expected_template_sha256 is None or value['artifact_template_sha256'] != expected_template_sha256):
+        raise PortableError('Le paquet Windows ne correspond pas au programme signé.')
+    if persistent and expected_package_nonce is not None and value['package_nonce'] != expected_package_nonce:
+        raise PortableError('Le paquet Windows ne correspond pas à sa préparation.')
     value['controller_url'] = https_origin(value['controller_url'])
     return value
 
@@ -184,7 +217,10 @@ class PortableLease:
     A monotonic deadline bounds offline work and a slow/replayed HTTP response
     cannot extend the original request's lease. No local clock grants authority.
     """
-    def __init__(self, clock=time.monotonic):
+    def __init__(self, clock=time.monotonic, *, recoverable_expiry=False):
+        self._recoverable_expiry = recoverable_expiry
+        self._support_reference = None
+        self._intervention_id = None
         self._clock = clock
         self._lock = threading.RLock()
         self._deadline = 0.0
@@ -216,6 +252,17 @@ class PortableLease:
             if sequence > self._request_sequence or started > self._clock():
                 self._deadline = 0
                 raise PortableError('Autorisation temporaire WIFX incohérente.')
+            if self._recoverable_expiry:
+                try:
+                    intervention_id = value['intervention_id']
+                    if (str(uuid.UUID(intervention_id)) != intervention_id or
+                            not isinstance(value.get('support_reference'), str) or
+                            not re.fullmatch(r'WSUP-[0-9]{1,7}', value['support_reference'])):
+                        raise ValueError()
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    self._deadline = 0
+                    raise PortableError('Intervention WIFX invalide.') from None
+                self._intervention_id = intervention_id
             self._applied_sequence = sequence
             # Display metadata never grants authority or extends the 60s lease.
             self._authorization_deadline = None
@@ -233,18 +280,23 @@ class PortableLease:
                 self._authorization_deadline = started + duration
             except (KeyError, ValueError, TypeError, OverflowError):
                 pass
+            reference = value.get('support_reference')
+            if isinstance(reference, str) and re.fullmatch(r'WSUP-[0-9]{1,7}', reference):
+                self._support_reference = reference
             self._state = state
             self._deadline = started + seconds if state == 'authorized' else 0
-            if state in ('revoked', 'expired'):
+            if state == 'revoked' or state == 'expired' and not self._recoverable_expiry:
                 self._closed = True
             return self.allowed()
 
     def deny(self, state='revoked'):
         with self._lock:
+            if self._closed and state != 'revoked':
+                return
             self._state = state
             self._deadline = 0
             self._authorization_deadline = None
-            self._closed = True
+            self._closed = state == 'revoked' or not self._recoverable_expiry
 
     def allowed(self):
         with self._lock:
@@ -258,7 +310,7 @@ class PortableLease:
                 state = 'expired'
             authorization_remaining = (max(0, math.ceil(self._authorization_deadline-self._clock()))
                                        if self._authorization_deadline is not None else None)
-            return {'state': state, 'remaining_seconds': remaining,
+            return {'state': state, 'remaining_seconds': remaining, 'support_reference': self._support_reference, 'intervention_id': self._intervention_id,
                     'authorization_remaining_seconds': authorization_remaining if self.allowed() else 0}
 
 
@@ -270,6 +322,7 @@ def status_view(snapshot, lease):
     runs = snapshot.get('recent_runs', [])
     return {
         'version': str(snapshot.get('version', ''))[:64],
+        'ticket_reference': lease.get('support_reference') if isinstance(lease.get('support_reference'), str) and re.fullmatch(r'WSUP-[0-9]{1,7}', lease['support_reference']) else '',
         'application': 'ACTIF' if snapshot.get('running', True) else 'ARRÊTÉ',
         'controller': 'CONNECTÉ' if snapshot.get('controller_connected') else 'EN ATTENTE',
         'adoption': {'pending': 'EN ATTENTE WIFX', 'authorized': 'ADOPTÉ PAR WIFX',
@@ -281,7 +334,7 @@ def status_view(snapshot, lease):
         'remaining_seconds': int(lease['remaining_seconds']),
         'authorization_remaining_seconds': lease.get('authorization_remaining_seconds') if authorized else 0,
         # Raw Controller/PJSIP exceptions can contain endpoints or credentials.
-        'error': 'Connexion WIFX indisponible.' if snapshot.get('last_error') else '',
+        'error': portable_diagnostic(snapshot, lease),
     }
 
 
@@ -346,3 +399,29 @@ def websocket_connector():
         def handle_redirect(self, uri):
             raise InvalidHandshake("Redirection WSS refusée.")
     return NoRedirectConnect
+
+
+def portable_diagnostic(snapshot, lease):
+    """Evidence-based client wording; never guesses firewall or produces MOS.
+
+    Deliberately accepts a small category enum, not raw requests/PJSIP text.
+    Missing RTP does not prove a firewall, NAT or PBX cause.
+    """
+    state = lease.get('state')
+    if state == 'revoked': return 'Autorisation révoquée par WIFX.'
+    if state == 'expired': return 'Autorisation expirée ; renouvellement WIFX nécessaire.'
+    category = snapshot.get('controller_error_category')
+    if category == 'tls': return 'Certificat de connexion WIFX refusé.'
+    if category == 'timeout': return 'Connexion WIFX : délai dépassé.'
+    if category == 'network_dns': return 'Connexion WIFX : réseau ou DNS indisponible.'
+    if category == 'http': return 'Connexion WIFX refusée ; contacter WIFX.'
+    if category == 'enrollment_format_identity': return 'Identité ou préparation WIFX refusée.'
+    accounts = snapshot.get('accounts', [])
+    codes = [a.get('registration_code', 0) for a in accounts if isinstance(a, dict)]
+    if any(isinstance(code, int) and code >= 400 for code in codes):
+        return 'Enregistrement téléphonique refusé ; contacter WIFX.'
+    media = snapshot.get('media_evidence')
+    if media == 'no_rtp': return 'Appel établi, mais aucun média reçu. Causes possibles : réseau, NAT ou équipement téléphonique.'
+    if media == 'degraded': return 'Audio reçu avec une qualité dégradée.'
+    if snapshot.get('last_error'): return 'Connexion WIFX indisponible.'
+    return ''

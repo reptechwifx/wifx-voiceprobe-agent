@@ -1,6 +1,9 @@
 """Portable orchestration around the shared, unmodified SIP/RTP engines."""
 import copy
+import datetime
+import os
 import hashlib
+import json
 import tempfile
 import threading
 import time
@@ -30,15 +33,28 @@ class PortableAgent(Agent):
     """
     def __init__(self, provision, *, ca_file=None):
         self.provision = copy.deepcopy(provision)
-        self.identity = EphemeralIdentity()
-        self.lease = PortableLease()
+        self.persistent = provision.get('mode') == 'persistent'
+        self._admission_secret = None
+        if self.persistent:
+            from windows_identity import PersistentIdentity
+            expires = datetime.datetime.fromisoformat(provision['invitation_expires_at'].replace('Z', '+00:00'))
+            self.identity = PersistentIdentity(provision, allow_create=expires.timestamp() > time.time())
+        else:
+            self.identity = EphemeralIdentity()
+        self.lease = PortableLease(recoverable_expiry=self.persistent)
         self._display_lock = threading.Lock()
         self._display = status_view({}, self.lease.snapshot())
-        self._temporary = tempfile.TemporaryDirectory(prefix='WIFX-VoiceProbe-')
+        self._temporary = None
         self._closed_session = False
         self.completed_tests = 0
         try:
+            self._temporary = tempfile.TemporaryDirectory(prefix='WIFX-VoiceProbe-')
             protect_temporary_directory(self._temporary.name)
+            if os.name == 'nt' and (not self.persistent or self.identity.created):
+                from portable_memory import ProtectedSecret
+                self._admission_secret = ProtectedSecret(self.provision.pop('invitation_secret').encode('ascii'))
+            elif self.persistent:
+                self.provision.pop('invitation_secret', None)
             self._sessions = []
             self._sessions_lock = threading.Lock()
             self._thread_session = threading.local()
@@ -56,6 +72,10 @@ class PortableAgent(Agent):
             }
             super().__init__(config=cfg, data_directory=self._temporary.name)
             self.maintenance = _NoMaintenanceFiles()
+            if os.name == 'nt':
+                from portable_memory import ProtectedSessionConfig, ProtectedJournal
+                self.cfg = ProtectedSessionConfig(self.cfg)
+                self.journal = ProtectedJournal(self.journal)
         except BaseException:
             # A native transport failure can happen after libCreate/libInit.
             # Release it before deleting files, without masking the root error.
@@ -66,7 +86,14 @@ class PortableAgent(Agent):
                 except Exception:
                     pass
             self.identity.close()
-            self._temporary.cleanup()
+            getattr(self, 'cfg', {}).clear()
+            journal = getattr(self, 'journal', None)
+            if journal is not None:
+                journal.secrets = ()
+            if self._admission_secret is not None:
+                self._admission_secret.close()
+            if self._temporary is not None:
+                self._temporary.cleanup()
             for session in getattr(self, '_sessions', []):
                 session.close()
             raise
@@ -91,7 +118,13 @@ class PortableAgent(Agent):
         raise PortableError('La configuration de cette sonde est administrée par WIFX.')
 
     def _invitation(self):
-        return {'id': self.provision['invitation_id'], 'secret': self.provision['invitation_secret']}
+        result = {'id': self.provision['invitation_id']}
+        if self._admission_secret is not None:
+            with self._admission_secret.borrow() as secret:
+                result['secret'] = secret.decode('ascii')
+        elif 'invitation_secret' in self.provision:
+            result['secret'] = self.provision['invitation_secret']
+        return result
 
     def enrollment(self):
         request = self.lease.begin_request()
@@ -102,6 +135,8 @@ class PortableAgent(Agent):
                                  'pjsip_version': self.pjsip_version,
                                  'os': self.os_description(), 'architecture': 'AMD64',
                                  'installation_type': 'windows-portable'}}
+        if getattr(self, 'persistent', False):
+            payload['instance_id'] = self.provision['instance_id']
         result = self.identity.exchange(self.cfg, payload, session=self._http_session())
         self.lease.apply(result.get('portable', {}), request)
         state = result.get('state')
@@ -121,11 +156,13 @@ class PortableAgent(Agent):
             self.cfg['metadata_authority'] = 'controller'
         if state in ('rejected', 'revoked', 'expired'):
             self.lease.deny('expired' if state == 'expired' else 'revoked')
-        self.journal.secrets = self.safe_secrets() + (self.provision['invitation_secret'],)
+        self.journal.secrets = self.safe_secrets() + tuple([self._invitation()['secret']] if 'secret' in self._invitation() else [])
         if state == 'adopted' and self.cfg.get('token') and self.cfg.get('credential_ack_pending'):
-            self.identity.exchange(self.cfg, {
-                'action': 'ack', 'token_hash': hashlib.sha256(self.cfg['token'].encode()).hexdigest(),
-                'portable_invitation': self._invitation()}, session=self._http_session())
+            ack = {'action': 'ack', 'token_hash': hashlib.sha256(self.cfg['token'].encode()).hexdigest(),
+                   'portable_invitation': self._invitation()}
+            if getattr(self, 'persistent', False):
+                ack['instance_id'] = self.provision['instance_id']
+            self.identity.exchange(self.cfg, ack, session=self._http_session())
             self.cfg.pop('credential_ack_pending', None)
         return state == 'adopted' and bool(self.cfg.get('token'))
 
@@ -140,7 +177,7 @@ class PortableAgent(Agent):
             denied_state = 'revoked'
             try:
                 body = response.json() if len(response.content) <= 65536 else {}
-                if isinstance(body, dict) and body.get('portable_state') in ('expired', 'revoked'):
+                if isinstance(body, dict) and body.get('portable_state') in ('pending', 'expired', 'revoked'):
                     denied_state = body['portable_state']
             except (ValueError, TypeError):
                 pass
@@ -179,14 +216,29 @@ class PortableAgent(Agent):
         finally:
             worker.join(6)
 
+    def execute(self, command):
+        if getattr(self, 'persistent', False):
+            snapshot = self.lease.snapshot()
+            if (not self.lease.allowed() or not isinstance(command.get('payload'), dict) or
+                    command['payload'].get('intervention_id') != snapshot.get('intervention_id')):
+                raise PortableError('La commande ne correspond pas à l’intervention WIFX autorisée.')
+        return super().execute(command)
+
     def capacity(self, account):
         # Incoming correlation and outgoing execute both call capacity().
         return self.running and self.lease.allowed() and super().capacity(account)
 
     def apply_config(self, config):
-        if not self.running or not self.lease.allowed():
+        if not self.running or not self.lease.allowed() or self.calls:
+            return
+        # Shared engine comparison uses JSON containing live SIP credentials.
+        # Keep only a digest between polls; temporary JSON/PJSIP copies cannot
+        # be reliably zeroed by CPython and are not claimed to be encrypted.
+        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True).encode('utf-8')).hexdigest()
+        if fingerprint == self.remote_fingerprint:
             return
         super().apply_config(config)
+        self.remote_fingerprint = fingerprint
 
     def revoke_configuration(self):
         # Calls still need their account to finalize media/reporting. Their
@@ -209,9 +261,23 @@ class PortableAgent(Agent):
 
     def pending_report(self, run_id, metrics):
         self.completed_tests += 1
+        rtp = metrics.get('rtp') or {}
+        received = (rtp.get('rx') or {}).get('packets') if isinstance(rtp, dict) else None
+        audio = metrics.get('audio') or {}
+        if metrics.get('established') and type(received) is int and received == 0:
+            self._media_evidence = 'no_rtp'
+        elif type(received) is int and received > 0 and isinstance(audio, dict) and isinstance(audio.get('interrupted_s'), (int, float)) and audio['interrupted_s'] > 0:
+            self._media_evidence = 'degraded'
+        else:
+            self._media_evidence = None
         return super().pending_report(run_id, metrics)
 
     def before_iteration(self):
+        current_intervention = self.lease.snapshot().get('intervention_id')
+        previous = getattr(self, '_current_intervention', None)
+        if previous is not None and previous != current_intervention:
+            self.revoke_configuration()
+        self._current_intervention = current_intervention
         if not self.lease.allowed():
             for call in list(self.calls.values()):
                 call.hangup_safe()
@@ -226,8 +292,13 @@ class PortableAgent(Agent):
                                      for a in list(self.accounts.values())],
                         'active_calls': len(self.calls),
                         'completed_tests': self.completed_tests,
-                        'recent_runs': self.recent_runs[:1], 'last_error': self.last_error}
-            view = status_view(snapshot, self.lease.snapshot())
+                        'recent_runs': self.recent_runs[:1], 'last_error': self.last_error,
+                        'controller_error_category': getattr(self, 'controller_error_category', None),
+                        'media_evidence': getattr(self, '_media_evidence', None)}
+            lease_view = self.lease.snapshot()
+            if lease_view.get('support_reference') is None:
+                lease_view['support_reference'] = self.provision.get('support_reference')
+            view = status_view(snapshot, lease_view)
             with self._display_lock:
                 self._display = view
             self._display_sampled = time.monotonic()
@@ -253,6 +324,8 @@ class PortableAgent(Agent):
                     pass
             self.lease.deny()
             self.identity.close()
+            if self._admission_secret is not None:
+                self._admission_secret.close()
             self.cfg.clear()
             self.provision.clear()
             self.remote = None

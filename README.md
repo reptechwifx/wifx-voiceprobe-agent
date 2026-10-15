@@ -7,7 +7,7 @@
 | Docker Linux AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 | Synology Intel AMD64¹ | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 
-**Windows portable x64 — EN COURS DE QUALIFICATION.** Le code et les outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est encore publié. Les candidats locaux sont explicitement LAB, non signés Authenticode. Voir le [guide Windows portable](docs/windows-portable.md). Les commandes Linux ci-dessus restent inchangées.
+**Windows portable x64 — 0.2.0-LAB, EN COURS DE QUALIFICATION.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
 
 Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-004 · installateurs 1.0.0 · PJSIP/PJSUA2 2.16 précompilé.**
 

@@ -1,0 +1,29 @@
+{
+  "source_site": "https://www.wifx.net/",
+  "original_svg_matches_controller_asset": true,
+  "originals": [
+    {
+      "file": "wifx-logo.png",
+      "source": "https://www.wifx.net/wp-content/uploads/2022/11/Simple-1500px.png",
+      "sha256": "95c25672dbbd6bcb8917e96d6f6d7abd9d0af816534f89d25e672928ebdd6c70"
+    },
+    {
+      "file": "wifx-logo.svg",
+      "source": "https://www.wifx.net/ (inline header SVG)",
+      "sha256": "dbcf2ca28712537d01cd0fff7a67531ccf81a2afa1bb036171b31e9e7632af0c"
+    },
+    {
+      "file": "wifx-symbol.png",
+      "source": "https://www.wifx.net/wp-content/uploads/2022/06/cropped-wifx_favicon-300x300.png",
+      "sha256": "386d1017712800a5bcb89ee44e1775c477c5e902166328f928975a8a5e6d044d"
+    }
+  ],
+  "derived": {
+    "wifx-logo.bmp": "Official full logo resized on white for native Win32; no shape changes.",
+    "wifx.ico": "Official favicon resized into standard Windows icon sizes, alpha preserved."
+  },
+  "website_reference_color": "#1556a3",
+  "website_font": "Graphik; not redistributed because desktop redistribution rights are not established",
+  "windows_font": "Segoe UI, existing system font; no font binaries bundled",
+  "conversion_tool": "Pillow 12.3.0; build-time only"
+}

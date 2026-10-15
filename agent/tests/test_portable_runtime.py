@@ -271,7 +271,7 @@ class SharedEngineHooksTest(unittest.TestCase):
             instance.endpoint = endpoint
             observed['temporary'] = Path(data_directory)
             raise ValueError("injected transport startup failure")
-        provision = {'name': 'LAB', 'controller_url': 'https://controller.example'}
+        provision = {'name': 'LAB', 'controller_url': 'https://controller.example', 'invitation_secret': 'A'*43}
         with patch.object(self.portable, 'EphemeralIdentity', return_value=identity), patch.object(self.main.Agent, '__init__', failing_init):
             with self.assertRaisesRegex(ValueError, 'injected transport startup failure'):
                 self.portable.PortableAgent(provision)

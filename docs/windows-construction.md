@@ -91,3 +91,47 @@ Sur Windows 11 build 26300 / CPython 3.13.16, les résultats observés sont :
 Ces mesures proviennent de compteurs RTP/RTCP et du PCM enregistré par le moteur ; aucune capture PCAP n’a été réalisée dans cet essai. Le RTT RTCP brut, par exemple 356 ms sur un appel G.722, est conservé séparément du délai audio d’écho. Il ne faut pas les présenter comme une même mesure. La topologie utilise le renvoi de ports loopback Docker Desktop et ne qualifie pas à elle seule le NAT ou le pare-feu d’un poste client.
 
 Ces résultats qualifient le moteur source Windows dans ce LAB. La qualification de l’EXE complet, du provisioning, de la révocation et de sa distribution possède son propre rapport ; les essais moteur ne la remplacent pas.
+
+## Paquet personnalisé unique — outillage portable 0.2.0 LAB
+
+Le template universel PyInstaller reste sans invitation personnelle. L’outil `agent/windows/personalize-portable.py` ajoute une enveloppe ASCII bornée contenant le provisioning v2 signé. L’enveloppe lie l’identité de préparation, son nonce et le SHA-256 exact du template autorisé. Aucun mot de passe SIP n’entre dans ce paquet. Une invitation est un droit d’enrôlement limité ; elle n’est pas un accès administrateur et ne dispense jamais de l’adoption ni de l’autorisation de test renouvelée.
+
+La table PE AMD64, les sections, la table des certificats, le cookie CP313 et les entrées CArchive sont contrôlés. Les duplications, troncatures, données finales injectées, empreintes divergentes et destinations existantes sont refusées. La personnalisation d’un template déjà personnalisé ou signé est refusée. Le format n’ajoute aucun second cookie binaire susceptible de détourner le chargement PyInstaller. La présence structurelle d’un certificat n’est jamais présentée comme une signature de confiance valide.
+
+Le worker dédié reçoit uniquement un job JSON privé et un catalogue administrateur. Commande interne fixe :
+
+```sh
+python3 agent/windows/personalize-portable.py --job job.json --catalog catalogue.json --output paquet-nouveau
+```
+
+Le job ne fournit ni chemin de template, ni commande, ni racine de confiance. Le catalogue fixe ces valeurs et leur empreinte. La clé privée de provisioning reste exclusivement dans le worker de signature distinct de l’application Web. L’outil Python vérifie la signature avec la clé publique ; il n’a besoin d’aucune clé privée. La sortie contient `WIFX-VoiceProbe.exe` et un reçu privé `result.json`. Seul l’EXE est transmis au destinataire autorisé. Aucun paquet personnalisé ne doit être publié sur GitHub.
+
+Le mode `production` échoue actuellement avec `SIGNING_NOT_CONFIGURED`. Le mode `lab` produit un binaire **non signé Authenticode, réservé au technicien et au laboratoire**. Il ne constitue pas une distribution client. L’Agent extrait son provisioning intégré ; les anciens fichiers voisins `.provision.json` ne sont pas chargés par cette nouvelle entrée.
+
+Les données officielles WIFX du répertoire `assets` sont embarquées ; aucune image ni police n’est téléchargée au lancement. Le moteur PJSIP qualifié est réutilisé sans reconstruction. Le constructeur compare les empreintes de toutes les sources et ressources avant et après construction.
+
+La compatibilité de l’overlay avec le bootloader a été exécutée sur Windows réel en ajoutant un document synthétique à un EXE QA : auto-test CPython 3.13.16 / PJSIP 2.16 / audio nul / trois codecs réussi. Cet essai ne remplace pas la qualification du nouveau template complet et de l’adoption intégrée.
+
+Références de format : [CArchive et lancement PyInstaller](https://pyinstaller.org/en/stable/advanced-topics.html), [structure PE et Authenticode](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format).
+
+## Signature Windows future et renouvellement de confiance
+
+L’ordre obligatoire est : construire et auditer le template → personnaliser et vérifier le provisioning → signer l’EXE final → vérifier chaîne de confiance, éditeur attendu et horodatage → vérifier à nouveau le format intégré et exécuter le binaire signé. Toute personnalisation ultérieure impose une nouvelle signature ; le système ne modifie jamais un EXE signé pour y injecter une configuration.
+
+Azure Artifact Signing Public Trust est une option à provisionner. La documentation Microsoft actuelle admet les organisations suisses, ce qui ne prouve pas l’éligibilité ou la validation de WIFX SA. Il reste à fournir un tenant et un abonnement Azure, valider l’identité légale et créer un profil Public Trust. Aucun compte, abonnement ou certificat n’a été créé dans ce chantier. Un profil Private Trust ou Public Trust Test ne doit pas être présenté comme reconnu pour la distribution client. Voir [prérequis et validation d’identité](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart).
+
+Le script `sign-azure-artifact.ps1` prépare l’interface de signature, désactivée sans qualification explicite. Il attend un SignTool et une DLL de signature administrés, des métadonnées locales limitées au compte/profil/endpoint Azure HTTPS, et une identité de service externe à l’application Web. Il n’accepte aucun secret dans ses arguments. L’attribution du rôle de signature doit se limiter au seul profil dédié. Aucune installation de SDK, Visual Studio ou modification des stratégies Windows n’est effectuée.
+
+Après signature, le script exige une signature Windows valide, le nom exact de l’éditeur attendu et un certificat d’horodatage. Le service utilise des certificats de courte durée ; l’horodatage est nécessaire. L’endpoint HTTPS d’horodatage Microsoft est documenté. L’adaptateur reste **non qualifié**, sans accès réel Azure ; il n’est pas raccordé au worker de production. Références : [intégration Artifact Signing](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations), [exemple Microsoft d’horodatage HTTPS](https://learn.microsoft.com/en-us/windows/msix/package/sign-msix-package-guide).
+
+Les signatures de manifestes RSA4096 Linux, de provisioning Windows et Authenticode répondent à des objectifs différents. La confiance HTTPS continue d’utiliser la validation TLS et l’origine autorisée. Aucun certificat auto-signé n’est ajouté au magasin système. Une future rotation de racine de provisioning ou d’épinglage SPKI réseau devra être explicitement signée par une racine déjà autorisée, bornée dans le temps et qualifiée avant activation ; aucun renouvellement implicite ou contournement TLS n’est implémenté.
+
+## Suppression explicite de l’identité Windows
+
+Pour un paquet personnalisé privé, après fermeture de la sonde, le même EXE fournit la commande suivante depuis son répertoire :
+
+```powershell
+.\WIFX-VoiceProbe.exe --forget-identity
+```
+
+Adapter uniquement le nom si le fichier a été renommé. Cette commande vérifie à nouveau le provisioning intégré et sa liaison au template autorisé, puis demande une confirmation native avec **Non par défaut**. Elle supprime seulement la clé CNG et la métadonnée HKCU de cette instance signée. Elle refuse une identité occupée, incorrecte ou absente ; elle ne crée jamais de clé pour effectuer ce nettoyage. Aucune recherche globale d’instances, aucun moteur SIP et aucune connexion réseau ne sont nécessaires. Les autres sondes restent intactes. Une annulation retourne 2 sans afficher de succès ; un refus retourne 1 ; seule une suppression confirmée réussie retourne 0. Fermer le programme ne supprime pas l’identité persistante : utiliser cette commande avant d’effacer le fichier si cette identité n’est plus utile.

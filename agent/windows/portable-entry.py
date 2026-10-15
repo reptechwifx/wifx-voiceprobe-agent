@@ -39,10 +39,68 @@ def self_test():
         endpoint.libDestroy()
 
 
+def load_integrated_provision(root, executable, policy):
+    """Same signed package binding for startup and explicit identity cleanup."""
+    from cryptography.hazmat.primitives import serialization
+    from portable_package import extract, read_regular
+    from portable_runtime import PortableError, verify_provisioning
+    from version import VERSION
+    pem = (root / 'provisioning-public.pem').read_bytes()
+    key = serialization.load_pem_public_key(pem)
+    der = key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    fingerprint = hashlib.sha256(der).hexdigest()
+    if fingerprint != policy['provisioning_key_sha256']:
+        raise PortableError('Racine de préparation incohérente.')
+    if policy['qualification'] != 'lab':
+        raise PortableError('Signature Windows de production non qualifiée.')
+    embedded = extract(read_regular(executable))
+    return verify_provisioning(embedded['provisioning'], {fingerprint: pem}, agent_version=VERSION,
+                               expected_template_sha256=embedded['template_sha256'],
+                               expected_package_nonce=embedded['package_nonce'])
+
+
+def forget_identity(provision, ask, notify, *, identity_factory=None):
+    """Forget one verified instance after explicit confirmation; no SIP/network."""
+    from portable_runtime import PortableError
+    if provision.get('mode') != 'persistent':
+        raise PortableError('Ce paquet ne possède pas une identité Windows persistante.')
+    if not ask('Supprimer l’identité de cette sonde ?',
+               'Cette action supprime uniquement l’identité locale de cette sonde WIFX.\n'
+               'Une nouvelle autorisation WIFX sera nécessaire pour la réutiliser.\n'
+               'Les autres sondes ne seront pas modifiées.\n\nVoulez-vous continuer ?'):
+        return 2  # Cancellation is never reported as successful deletion.
+    if identity_factory is None:
+        from windows_identity import PersistentIdentity
+        identity_factory = PersistentIdentity
+    identity = identity_factory(provision, allow_create=False)
+    try:
+        identity.forget()
+    finally:
+        identity.close()
+    notify('Identité supprimée', 'L’identité locale de cette sonde a été supprimée. Vous pouvez supprimer cet EXE.')
+    return 0
+
+
+def native_forget_dialogs():
+    import ctypes
+    from ctypes import wintypes as w
+    user = ctypes.WinDLL('user32', use_last_error=True)
+    user.MessageBoxW.argtypes = [w.HWND, w.LPCWSTR, w.LPCWSTR, w.UINT]
+    user.MessageBoxW.restype = ctypes.c_int
+    def ask(title, message):
+        # MB_DEFBUTTON2 makes NO the default, including keyboard Enter.
+        return user.MessageBoxW(None, message, title, 4 | 0x30 | 0x100) == 6
+    def notify(title, message):
+        user.MessageBoxW(None, message, title, 0x40)
+    return ask, notify
+
+
 def main():
     parser = argparse.ArgumentParser(description='WIFX Voice Probe — sonde portable')
-    parser.add_argument('--self-test', action='store_true')
-    parser.add_argument('--gui-smoke', type=int, metavar='SECONDS', help=argparse.SUPPRESS)
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument('--self-test', action='store_true')
+    actions.add_argument('--forget-identity', action='store_true', help='Supprimer explicitement l’identité locale de cette sonde, après confirmation.')
+    actions.add_argument('--gui-smoke', type=int, metavar='SECONDS', help=argparse.SUPPRESS)
     args = parser.parse_args()
     root = resources()
     policy = json.loads((root / 'build-trust.json').read_text(encoding='utf-8'))
@@ -54,8 +112,20 @@ def main():
         return 0
     if args.gui_smoke is not None and (policy['qualification'] != 'lab' or not 1 <= args.gui_smoke <= 60):
         parser.error('Mode réservé à la qualification LAB.')
+    if args.forget_identity:
+        from portable_runtime import PortableError
+        from portable_package import PackageError
+        ask, notify = native_forget_dialogs()
+        try:
+            if not getattr(sys, 'frozen', False):
+                raise PortableError('Le nettoyage exige le paquet Windows vérifié.')
+            provision = load_integrated_provision(root, Path(sys.executable), policy)
+            return forget_identity(provision, ask, notify)
+        except (PortableError, PackageError) as error:
+            notify('Suppression refusée', str(error))
+            return 1
     from portable_gui import run_window
-    from portable_runtime import PortableError, verify_provisioning
+    from portable_runtime import PortableError
     from version import VERSION
     completed = threading.Event()
     state_lock = threading.Lock()
@@ -83,18 +153,9 @@ def main():
                     state['application'] = 'ACTIF'
                 stopping.wait(args.gui_smoke + 10)
                 return
-            pem = (root / 'provisioning-public.pem').read_bytes()
-            from cryptography.hazmat.primitives import serialization
-            key = serialization.load_pem_public_key(pem)
-            der = key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
-            fingerprint = hashlib.sha256(der).hexdigest()
-            if fingerprint != policy['provisioning_key_sha256']:
-                raise PortableError('Racine de préparation incohérente.')
-            location = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
-            document = location / 'WIFX-VoiceProbe.provision.json'
-            if document.is_symlink() or document.stat().st_size > 65536:
-                raise PortableError('Paquet de préparation invalide.')
-            provision = verify_provisioning(document.read_bytes(), {fingerprint: pem}, agent_version=VERSION)
+            if not getattr(sys, 'frozen', False):
+                raise PortableError('Utilisez le paquet Windows préparé par votre technicien WIFX.')
+            provision = load_integrated_provision(root, Path(sys.executable), policy)
             from portable_agent import PortableAgent
             ca = root / 'lab-ca.crt'
             agent = PortableAgent(provision, ca_file=str(ca) if policy['qualification'] == 'lab' and ca.is_file() else None)

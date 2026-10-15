@@ -35,16 +35,18 @@ def main():
     subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-index', '--find-links', str(args.wheels.resolve()),
                     '--require-hashes', '--only-binary=:all:', '--disable-pip-version-check',
                     '-r', str(root/'agent/windows/requirements-build.lock')], check=True)
-    sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').glob('*')) + [root/'VERSION']
-    sources = [f for f in sources if f.is_file() and f.name != 'gateway.py']
-    source_hashes = {f.relative_to(root).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest() for f in sources}
+    def source_manifest():
+        sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').rglob('*')) + [root/'VERSION']
+        sources = [f for f in sources if f.is_file() and f.name != 'gateway.py' and '__pycache__' not in f.parts]
+        return {f.relative_to(root).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest() for f in sources}
+    source_hashes = source_manifest()
     with tempfile.TemporaryDirectory(prefix='voiceprobe-build-') as work:
         subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                         '--distpath', str(args.output.resolve()), '--workpath', work,
                         str(root/'agent/windows/portable.spec')], env=env, check=True)
-    if any(hashlib.sha256((root/name).read_bytes()).hexdigest() != digest for name, digest in source_hashes.items()):
+    if source_manifest() != source_hashes:
         raise ValueError('Sources modifiées pendant la construction ; candidat non qualifiable.')
-    receipt = {'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'artifacts': []}
+    receipt = {'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
     for f in sorted(args.output.glob('*.exe')):
         receipt['artifacts'].append({'file': f.name, 'bytes': f.stat().st_size,
                                     'sha256': hashlib.sha256(f.read_bytes()).hexdigest()})
