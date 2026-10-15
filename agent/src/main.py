@@ -336,12 +336,12 @@ class ProbeAccount(pj.Account):
 
 
 class Agent:
-    def __init__(self):
+    def __init__(self, config=None, data_directory=None):
         self.config_lock = threading.RLock()
         self.path = pathlib.Path(
             os.getenv("CONFIG_FILE", "/var/lib/voiceprobe/config.json")
         )
-        self.cfg = json.loads(self.path.read_text())
+        self.cfg = dict(config) if config is not None else json.loads(self.path.read_text())
         if self.cfg.get("identity_private_key"):
             verify_identity(self.cfg)
         self.connection_generation = 0
@@ -360,7 +360,7 @@ class Agent:
         )
         self.controller_version = None
         uuid.UUID(self.cfg["id"])
-        self.data = self.path.parent
+        self.data = pathlib.Path(data_directory) if data_directory is not None else self.path.parent
         self.data.mkdir(exist_ok=True)
         self.maintenance = Maintenance(self.data)
         self.tone = self.data / "tone-1000.wav"
@@ -368,7 +368,7 @@ class Agent:
         self.echo_tone = self.data / "echo-reference.wav"
         reference(self.echo_tone, seconds=310, rate=16000, envelope=True)
         self.db = sqlite3.connect(
-            str(self.data / "state.sqlite"), check_same_thread=False
+            self.database_location(), check_same_thread=False
         )
         self.lock = threading.Lock()
         self.db.executescript(
@@ -381,7 +381,8 @@ class Agent:
                 "SELECT payload FROM local_runs ORDER BY rowid DESC LIMIT 20"
             ).fetchall()
         ]
-        os.chmod(self.data / "state.sqlite", 0o600)
+        if (self.data / "state.sqlite").exists():
+            os.chmod(self.data / "state.sqlite", 0o600)
         for row in self.db.execute("SELECT run_id FROM active").fetchall():
             self.pending_report(
                 row[0],
@@ -430,6 +431,27 @@ class Agent:
         self.started_at = utc()
         self.pjsip_version = self.endpoint.libVersion().full
         self.supported_codecs = [x.codecId for x in self.endpoint.codecEnum2()]
+
+    def database_location(self):
+        return str(self.data / "state.sqlite")
+
+    def os_description(self):
+        if platform.system() == "Linux":
+            return platform.freedesktop_os_release().get("PRETTY_NAME", platform.platform())
+        return platform.platform()
+
+    def load_average(self):
+        try:
+            return os.getloadavg()[0]
+        except (AttributeError, OSError):
+            return None
+
+    def before_iteration(self):
+        """Optional platform admission policy, executed on the SIP thread."""
+
+    def request_stop(self):
+        self.running = False
+        self.poll_now.set()
 
     def safe_secrets(self):
         local = tuple(
@@ -594,7 +616,7 @@ class Agent:
                 "process_call_ceiling": 128,
                 "cpu_count": os.cpu_count(),
             },
-            "os": platform.freedesktop_os_release().get("PRETTY_NAME", platform.platform()),
+            "os": self.os_description(),
             "architecture": platform.machine(),
             "local_ip": network.get("primary_address")
             or next(
@@ -609,7 +631,7 @@ class Agent:
             ),
             "system": system,
             "network": network | {"public_ip": remote.get("public_ip_observed")},
-            "load": os.getloadavg()[0],
+            "load": self.load_average(),
             "memory": system.get("memory"),
             "temperature_c": system.get("temperature_c"),
             "controller_connected": self.controller_connected,
@@ -677,7 +699,7 @@ class Agent:
     def capacity(self, account):
         return (
             not self.maintenance.refresh()
-            and os.getloadavg()[0]
+            and (self.load_average() or 0)
             < max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5)
             and len(self.calls)
             < min((self.remote or {}).get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"])
@@ -721,6 +743,16 @@ class Agent:
         with self.lock:
             self.db.execute("INSERT OR IGNORE INTO active VALUES (?)", (run_id,))
             self.db.commit()
+
+    def revoke_configuration(self):
+        for call in self.calls.values():
+            call.hangup_safe()
+        for account in self.accounts.values():
+            account.shutdown()
+        self.accounts.clear()
+        self.prepared.clear()
+        self.remote = None
+        self.remote_fingerprint = None
 
     def apply_config(self, config):
         fingerprint = json.dumps(config, sort_keys=True)
@@ -941,7 +973,7 @@ class Agent:
             generation = self.connection_generation
         network = network_snapshot(cfg)
         addresses = [a["address"] for i in network.get("interfaces", []) for a in i.get("addresses", []) if a.get("address") and a.get("scope") != "host"][:16]
-        result = exchange(cfg, {"action": "present", "name": cfg["name"], "administrative": cfg.get("administrative", {}), "management_url": cfg.get("management_url") or None, "telemetry": {"version": VERSION, "build_id": BUILD_ID, "pjsip_version": self.pjsip_version, "hostname": socket.gethostname(), "os": platform.freedesktop_os_release().get("PRETTY_NAME", platform.platform()), "architecture": platform.machine(), "local_ip": network.get("primary_address"), "local_addresses": addresses, "installation_type": cfg.get("installation_type", "native")}})
+        result = exchange(cfg, {"action": "present", "name": cfg["name"], "administrative": cfg.get("administrative", {}), "management_url": cfg.get("management_url") or None, "telemetry": {"version": VERSION, "build_id": BUILD_ID, "pjsip_version": self.pjsip_version, "hostname": socket.gethostname(), "os": self.os_description(), "architecture": platform.machine(), "local_ip": network.get("primary_address"), "local_addresses": addresses, "installation_type": cfg.get("installation_type", "native")}})
         state = result["state"]
         with self.config_lock:
             if generation != self.connection_generation:
@@ -992,7 +1024,7 @@ class Agent:
                     "telemetry": {
                         "version": VERSION,
                         "hostname": socket.gethostname(),
-                        "os": platform.freedesktop_os_release().get("PRETTY_NAME", platform.platform()),
+                        "os": self.os_description(),
                         "architecture": platform.machine(),
                         "installation_type": (
                             "container"
@@ -1116,8 +1148,11 @@ class Agent:
             self.poll_now.wait(2)
             self.poll_now.clear()
 
-    async def wss(self):
+    def websocket_connector(self):
         from websockets.legacy.client import connect
+        return connect
+
+    async def wss(self):
         while self.running:
             if self.adoption_state != "adopted" or not self.cfg.get("controller_url") or not self.cfg.get("token"):
                 await asyncio.sleep(5)
@@ -1129,7 +1164,7 @@ class Agent:
                     self.cfg["ca_file"],
                 )
                 ctx = ssl.create_default_context(cafile=self.cfg["ca_file"])
-                async with connect(
+                async with self.websocket_connector()(
                     self.cfg["wss_url"],
                     extra_headers={"Authorization": "Bearer " + self.cfg["token"]},
                     ssl=ctx,
@@ -1167,79 +1202,110 @@ class Agent:
                     pass
             time.sleep(1)
 
-    def run(self):
-        web_server = build_server(self)
-        threading.Thread(target=self.communication, daemon=True).start()
-        threading.Thread(target=lambda: asyncio.run(self.wss()), daemon=True).start()
-        threading.Thread(target=web_server.serve_forever, daemon=True).start()
-        threading.Thread(target=self.management_export, daemon=True).start()
-        signal.signal(signal.SIGTERM, lambda *args: setattr(self, "running", False))
-        signal.signal(signal.SIGINT, lambda *args: setattr(self, "running", False))
-        last_sample = 0
-        last_management = 0
-        while self.running:
-            self.maintenance.refresh()
-            self.endpoint.libHandleEvents(10)
-            try:
-                kind, value = self.inbox.get_nowait()
-                if kind == "config":
-                    if value[0] == self.connection_generation:
-                        self.apply_config(value[1])
-                elif kind == "revoked":
-                    for call in self.calls.values():
-                        call.hangup_safe()
-                    for a in self.accounts.values():
-                        a.shutdown()
-                    self.accounts.clear()
-                    self.prepared.clear()
-                    self.remote = None
+    def run(self, *, enable_web=True, install_signals=True, export_management=True):
+        # Portable mode never constructs the administrative HTTP server.
+        web_server = build_server(self) if enable_web else None
+        threads = [threading.Thread(target=self.communication, daemon=True)]
+        wss_ready = threading.Event()
+        wss_state = {}
+
+        def run_wss():
+            async def execute_wss():
+                wss_state["loop"] = asyncio.get_running_loop()
+                wss_state["task"] = asyncio.current_task()
+                wss_ready.set()
+                try:
+                    await self.wss()
+                except asyncio.CancelledError:
+                    pass
+            asyncio.run(execute_wss())
+
+        threads.append(threading.Thread(target=run_wss, daemon=True))
+        if web_server:
+            threads.append(threading.Thread(target=web_server.serve_forever, daemon=True))
+        if export_management:
+            threads.append(threading.Thread(target=self.management_export, daemon=True))
+        for thread in threads:
+            thread.start()
+        if install_signals:
+            signal.signal(signal.SIGTERM, lambda *args: self.request_stop())
+            signal.signal(signal.SIGINT, lambda *args: self.request_stop())
+        try:
+            last_sample = 0
+            last_management = 0
+            while self.running:
+                self.before_iteration()
+                if not self.running:
+                    break
+                self.maintenance.refresh()
+                self.endpoint.libHandleEvents(10)
+                try:
+                    kind, value = self.inbox.get_nowait()
+                    if kind == "config":
+                        if value[0] == self.connection_generation:
+                            self.apply_config(value[1])
+                    elif kind == "revoked":
+                        self.revoke_configuration()
+                    elif kind == "command" and value[0] == self.connection_generation:
+                        self.execute(value[1])
+                except queue.Empty:
+                    pass
+                except (pj.Error, ValueError):
+                    self.last_error = "SIP configuration could not be applied"
                     self.remote_fingerprint = None
-                elif kind == "command" and value[0] == self.connection_generation:
-                    self.execute(value[1])
-            except queue.Empty:
-                pass
-            except (pj.Error, ValueError):
-                self.last_error = "SIP configuration could not be applied"
-                self.remote_fingerprint = None
-            now = time.monotonic()
-            for rid, call in list(self.calls.items()):
+                now = time.monotonic()
+                for rid, call in list(self.calls.items()):
+                    if now - last_sample > 0.1:
+                        call.sample()
+                    if (
+                        call.started and now - call.started >= call.duration
+                    ) or now - call.created > call.duration + 30:
+                        call.hangup_safe()
+                    if call.finished and call.report():
+                        del self.calls[rid]
+                call = None
+                self.rejected = [c for c in self.rejected if not c.finished]
+                self.prepared = {
+                    k: v for k, v in self.prepared.items() if v["expires"] > now
+                }
                 if now - last_sample > 0.1:
-                    call.sample()
-                if (
-                    call.started and now - call.started >= call.duration
-                ) or now - call.created > call.duration + 30:
-                    call.hangup_safe()
-                if call.finished and call.report():
-                    del self.calls[rid]
+                    last_sample = now
+                if now - last_management > .2:
+                    # Only this SIP event loop acknowledges the maintenance barrier.
+                    # Expensive system/network measurements and disk I/O stay off it.
+                    self.management_barrier = {"pid": os.getpid(), "sampled_at": time.time(),
+                        "prepared_calls": len(self.prepared), "active_calls": len(self.calls),
+                        "maintenance": self.maintenance.status()}
+                    last_management = now
+        finally:
+            self.request_stop()
+            if wss_ready.wait(1):
+                try:
+                    wss_state["loop"].call_soon_threadsafe(wss_state["task"].cancel)
+                except RuntimeError:
+                    pass
+            for call in self.calls.values():
+                call.hangup_safe()
+            for _ in range(20):
+                self.endpoint.libHandleEvents(10)
+            for a in self.accounts.values():
+                a.shutdown()
+            self.calls.clear()
+            self.accounts.clear()
+            self.rejected.clear()
             call = None
-            self.rejected = [c for c in self.rejected if not c.finished]
-            self.prepared = {
-                k: v for k, v in self.prepared.items() if v["expires"] > now
-            }
-            if now - last_sample > 0.1:
-                last_sample = now
-            if now - last_management > .2:
-                # Only this SIP event loop acknowledges the maintenance barrier.
-                # Expensive system/network measurements and disk I/O stay off it.
-                self.management_barrier = {"pid": os.getpid(), "sampled_at": time.time(),
-                    "prepared_calls": len(self.prepared), "active_calls": len(self.calls),
-                    "maintenance": self.maintenance.status()}
-                last_management = now
-        for call in self.calls.values():
-            call.hangup_safe()
-        for _ in range(20):
-            self.endpoint.libHandleEvents(10)
-        for a in self.accounts.values():
-            a.shutdown()
-        self.calls.clear()
-        self.accounts.clear()
-        self.rejected.clear()
-        call = None
-        a = None
-        gc.collect()
-        web_server.shutdown()
-        web_server.server_close()
-        self.endpoint.libDestroy()
+            a = None
+            gc.collect()
+            if web_server:
+                web_server.shutdown()
+                web_server.server_close()
+            # Enrollment may have two bounded ten-second requests in flight.
+            deadline = time.monotonic() + 25
+            for thread in threads:
+                thread.join(max(0, deadline - time.monotonic()))
+            self.endpoint.libDestroy()
+            if all(not thread.is_alive() for thread in threads):
+                self.db.close()
 
 
 if __name__ == "__main__":

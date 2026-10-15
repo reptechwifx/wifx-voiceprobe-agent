@@ -6,3 +6,9 @@ var/
 *.crt
 agent/BUILD_ID
 __pycache__/
+*.exe
+*.dll
+*.pyd
+*.pfx
+*.p12
+*.nupkg

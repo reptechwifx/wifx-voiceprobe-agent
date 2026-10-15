@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Constructeur Windows local ; aucune installation système ni politique modifiée."""
+# SPDX-License-Identifier: GPL-3.0-or-later
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import struct
+import subprocess
+import sys
+import tempfile
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--sdk', type=Path, required=True)
+    p.add_argument('--trust', type=Path, required=True)
+    p.add_argument('--wheels', type=Path, required=True)
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--console', action='store_true')
+    args = p.parse_args()
+    if sys.platform != 'win32' or struct.calcsize('P') != 8 or sys.version_info[:2] != (3, 13):
+        raise ValueError('Python Windows 3.13 x64 requis ; aucun remplacement de l’ABI.')
+    if args.output.exists():
+        raise ValueError('Destination existante refusée.')
+    root = Path(__file__).resolve().parents[2]
+    policy = json.loads((args.trust/'build-trust.json').read_text(encoding='utf-8'))
+    if policy['qualification'] != 'lab':
+        raise ValueError('Seuls les candidats LAB sont construits ici ; qualification client distincte.')
+    env = dict(os.environ, VOICEPROBE_WINDOWS_SDK=str(args.sdk.resolve()),
+               VOICEPROBE_WINDOWS_TRUST=str(args.trust.resolve()),
+               VOICEPROBE_WINDOWS_CONSOLE='1' if args.console else '0')
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-index', '--find-links', str(args.wheels.resolve()),
+                    '--require-hashes', '--only-binary=:all:', '--disable-pip-version-check',
+                    '-r', str(root/'agent/windows/requirements-build.lock')], check=True)
+    sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').glob('*')) + [root/'VERSION']
+    sources = [f for f in sources if f.is_file() and f.name != 'gateway.py']
+    source_hashes = {f.relative_to(root).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest() for f in sources}
+    with tempfile.TemporaryDirectory(prefix='voiceprobe-build-') as work:
+        subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
+                        '--distpath', str(args.output.resolve()), '--workpath', work,
+                        str(root/'agent/windows/portable.spec')], env=env, check=True)
+    if any(hashlib.sha256((root/name).read_bytes()).hexdigest() != digest for name, digest in source_hashes.items()):
+        raise ValueError('Sources modifiées pendant la construction ; candidat non qualifiable.')
+    receipt = {'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'artifacts': []}
+    for f in sorted(args.output.glob('*.exe')):
+        receipt['artifacts'].append({'file': f.name, 'bytes': f.stat().st_size,
+                                    'sha256': hashlib.sha256(f.read_bytes()).hexdigest()})
+    if len(receipt['artifacts']) != 1:
+        raise ValueError('EXE final absent ou ambigu.')
+    (args.output/'build-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
+    print(json.dumps(receipt))
+
+
+if __name__ == '__main__':
+    main()

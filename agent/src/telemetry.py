@@ -52,6 +52,8 @@ def _cpuset(value):
 
 
 def system_snapshot(data_path=None):
+    if platform.system() == "Windows":
+        return _windows_system_snapshot(data_path)
     container = pathlib.Path('/.dockerenv').exists() or pathlib.Path('/run/.containerenv').exists() or any(x in (_read('/proc/1/cgroup') or '') for x in ('docker', 'kubepods', 'containerd'))
     cores = os.cpu_count() or 1
     try:
@@ -77,7 +79,7 @@ def system_snapshot(data_path=None):
         pass
     try:
         load = os.getloadavg()[0]
-    except OSError:
+    except (AttributeError, OSError):
         load = None
     total_mem, used_mem, available_mem = host_total, host_used, host_avail
     cpu_percent = host_cpu
@@ -145,6 +147,8 @@ def _ip(args):
 
 def network_snapshot(cfg=None):
     cfg = cfg or {}
+    if platform.system() == "Windows":
+        return _windows_network_snapshot(cfg)
     addresses = _ip(['address', 'show'])
     interfaces = [{'name': x.get('ifname'), 'up': 'UP' in x.get('flags', []), 'addresses': [{'family': y.get('family'), 'address': y.get('local'), 'prefixlen': y.get('prefixlen'), 'scope': y.get('scope')} for y in x.get('addr_info', [])]} for x in addresses]
     if not interfaces:
@@ -186,3 +190,66 @@ def network_snapshot(cfg=None):
     container = pathlib.Path('/.dockerenv').exists() or pathlib.Path('/run/.containerenv').exists()
     primary_address = next((a['address'] for i in interfaces if i['name'] == route.get('dev') for a in i['addresses'] if a['family'] == 'inet'), None)
     return {'hostname': socket.gethostname(), 'primary_address': primary_address, 'interfaces': interfaces, 'primary_interface': route.get('dev'), 'gateway': route.get('gateway'), 'dns': dns, 'controller_url': cfg.get('controller_url'), 'management_url': cfg.get('management_url'), 'public_ip': None, 'scope': 'container' if container else 'host'}
+
+
+def _windows_system_snapshot(data_path=None):
+    """Use the qualified Windows psutil wheel; unavailable values stay null."""
+    memory = {"total_bytes": None, "used_bytes": None, "available_bytes": None, "percent": None, "source": "unavailable"}
+    cpu = {"percent": None, "available_cores": os.cpu_count(), "load_1m": None, "load_scope": "unavailable", "source": "unavailable"}
+    disk = {"total_bytes": None, "used_bytes": None, "free_bytes": None, "percent": None, "path": str(data_path or pathlib.Path.home()), "scope": "filesystem_visible_to_agent"}
+    uptime = None
+    try:
+        import psutil
+        m = psutil.virtual_memory()
+        memory.update(total_bytes=m.total, used_bytes=m.total-m.available, available_bytes=m.available, percent=m.percent, source="Windows GlobalMemoryStatusEx")
+        cpu.update(percent=psutil.cpu_percent(interval=None), source="Windows GetSystemTimes")
+        uptime = max(0, time.time() - psutil.boot_time())
+    except (ImportError, OSError):
+        pass
+    try:
+        d = shutil.disk_usage(data_path or pathlib.Path.home())
+        disk.update(total_bytes=d.total, used_bytes=d.used, free_bytes=d.free, percent=_ratio(d.used, d.total))
+    except OSError:
+        pass
+    return {"scope": "host", "cpu": cpu, "memory": memory, "disk": disk,
+            "uptime_s": uptime, "process_uptime_s": round(time.monotonic()-_started),
+            "temperature_c": None, "temperature_scope": "unavailable",
+            "host": {"scope": "host", "os": platform.platform(), "cpu_count": os.cpu_count(), "load_1m": None}}
+
+
+def _windows_network_snapshot(cfg):
+    interfaces = []
+    try:
+        import psutil
+        stats = psutil.net_if_stats()
+        for name, entries in psutil.net_if_addrs().items():
+            addresses = []
+            for entry in entries:
+                if entry.family in (socket.AF_INET, socket.AF_INET6):
+                    address = entry.address.split("%", 1)[0]
+                    addresses.append({"family": "inet" if entry.family == socket.AF_INET else "inet6", "address": address, "scope": "host" if address in ("127.0.0.1", "::1") else "local"})
+            interfaces.append({"name": name, "up": bool(stats.get(name) and stats[name].isup), "addresses": addresses})
+    except (ImportError, OSError):
+        pass
+    # Report an observable route to the configured Controller, with no packets
+    # transmitted. Multiple interfaces and IPv6 remain visible independently.
+    primary = None
+    try:
+        from urllib.parse import urlsplit
+        target = urlsplit(cfg.get("controller_url") or "")
+        if target.hostname:
+            for family, kind, protocol, _, destination in socket.getaddrinfo(target.hostname, target.port or 443, type=socket.SOCK_DGRAM):
+                with socket.socket(family, kind, protocol) as route:
+                    try:
+                        route.connect(destination)
+                        primary = route.getsockname()[0].split("%", 1)[0]
+                        break
+                    except OSError:
+                        pass
+    except (OSError, ValueError):
+        pass
+    primary_interface = next((i["name"] for i in interfaces if any(a["address"] == primary for a in i["addresses"])), None)
+    return {"hostname": socket.gethostname(), "primary_address": primary, "interfaces": interfaces,
+            "primary_interface": primary_interface, "gateway": None, "dns": [],
+            "controller_url": cfg.get("controller_url"), "management_url": None, "public_ip": None,
+            "scope": "host"}

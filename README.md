@@ -7,6 +7,8 @@
 | Docker Linux AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 | Synology Intel AMD64¹ | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 
+**Windows portable x64 — EN COURS DE QUALIFICATION.** Le code et les outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est encore publié. Les candidats locaux sont explicitement LAB, non signés Authenticode. Voir le [guide Windows portable](docs/windows-portable.md). Les commandes Linux ci-dessus restent inchangées.
+
 Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-004 · installateurs 1.0.0 · PJSIP/PJSUA2 2.16 précompilé.**
 
 ¹ Synology : profil logiciel BusyBox/Container Manager vérifié en laboratoire ; aucun NAS physique n’a été testé. L’architecture est Intel x86-64, jamais ARM. Les commandes ci-dessus sont interactives ; SSH avec terminal et droits sudo est requis. En session root autorisée, omettre `sudo`.
