@@ -4,6 +4,8 @@ import asyncio, gc, json, os, pathlib, platform, queue, re, signal, socket, sqli
 import requests, websockets, pjsua2 as pj
 from audio import reference, analyze, analyze_echo, observe_audio
 from incoming import correlate, trusted_pbx_addresses, reception_status, outgoing_allowed
+from reporting import recovery_report, ReportOutbox
+from remote_update import RemoteUpdate
 from sdp import constrain_audio
 from localweb import build_server
 from version import VERSION, DISPLAY_VERSION, BUILD_ID
@@ -49,6 +51,7 @@ class ProbeCall(pj.Call):
         self.created = time.monotonic()
         self.incoming = None
         self.answer_at = None
+        self.pending_response = None
         self.audio_profile = account.config.get("audio_profile", "tone-1000")
         self.destination = None
         self.started = None
@@ -343,7 +346,7 @@ class ProbeAccount(pj.Account):
             if not matched:
                 call.incoming = {"observed_at": utc(), "correlation": "unrecognized", "source": source}
                 with self.agent.lock:
-                    self.agent.db.execute("INSERT INTO incoming_active VALUES (?,?)", (run_id, json.dumps(call.incoming)))
+                    self.agent.db.execute("INSERT INTO incoming_active VALUES (?,?)", (run_id, json.dumps({"incoming": call.incoming, "account_id": self.config["id"]})))
                     self.agent.db.commit()
             self.agent.calls[run_id] = call
             self.agent.prepared.pop(matched, None)
@@ -351,7 +354,9 @@ class ProbeAccount(pj.Account):
             call.answer_at = time.monotonic() + 1.0
         else:
             self.agent.rejected.append(call)
-        call.answer(op)
+        # PJSUA2 2.16 releases incoming_data after this callback. A final
+        # response here may release it first inside PJSUA and abort on return.
+        call.pending_response = op.statusCode
 
 
 
@@ -383,6 +388,7 @@ class Agent:
         self.data = pathlib.Path(data_directory) if data_directory is not None else self.path.parent
         self.data.mkdir(exist_ok=True)
         self.maintenance = Maintenance(self.data)
+        self.remote_update = RemoteUpdate(self.data)
         self.tone = self.data / "tone-1000.wav"
         reference(self.tone, seconds=310, rate=16000)
         self.echo_tone = self.data / "echo-reference.wav"
@@ -408,16 +414,9 @@ class Agent:
             incoming_row = self.db.execute("SELECT payload FROM incoming_active WHERE run_id=?", (row[0],)).fetchone()
             self.pending_report(
                 row[0],
-                {
-                    "established": False,
-                    "duration_s": 0,
-                    "sip": {"reason": "Agent restarted during execution"},
-                    "rtp": {},
-                    "audio": None,
-                    "events": [{"kind": "process_restart", "at": utc()}],
-                    **({"incoming": json.loads(incoming_row[0])} if incoming_row else {}),
-                },
+                recovery_report(json.loads(incoming_row[0]) if incoming_row else None),
             )
+        self.report_outbox = ReportOutbox(self.db, self.lock)
         self.inbox = queue.Queue()
         self.accounts = {}
         self.calls = {}
@@ -457,6 +456,13 @@ class Agent:
 
     def database_location(self):
         return str(self.data / "state.sqlite")
+
+    def distribution_platform(self):
+        if platform.system() != "Linux":
+            return None
+        info = platform.freedesktop_os_release()
+        import sys
+        return {("ubuntu", "24.04", (3, 12)): "ubuntu-24.04-amd64-cp312", ("debian", "12", (3, 11)): "debian-12-amd64-cp311"}.get((info.get("ID"), info.get("VERSION_ID"), sys.version_info[:2]))
 
     def os_description(self):
         if platform.system() == "Linux":
@@ -635,6 +641,9 @@ class Agent:
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
+                "configuration_ack_protocol": 1,
+                "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
+                "distribution_platform": self.distribution_platform(),
                 "destination_policy": "account-public-v1",
                 "max_calls": self.cfg["max_calls"],
                 "media_clock": 16000,
@@ -662,6 +671,8 @@ class Agent:
             "controller_connected": self.controller_connected,
             "controller_error_category": getattr(self,"controller_error_category",None),
             "controller_http_status": getattr(self,"controller_http_status",None),
+            "controller_last_endpoint": getattr(self,"controller_last_endpoint",None),
+            "report_delivery": self.report_outbox.snapshot() if hasattr(self,"report_outbox") else None,
             "wss_connected": self.wss_connected,
             "last_controller": self.last_controller,
             "last_error": self.last_error,
@@ -721,16 +732,19 @@ class Agent:
         }
         return redact(result, self.safe_secrets())
 
+    def capacity_reason(self, account):
+        if self.maintenance.refresh():
+            return "MAINTENANCE_ACTIVE: Maintenance active."
+        if (self.load_average() or 0) >= max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5):
+            return "CPU_LOAD_EXCEEDED: Charge CPU excessive."
+        if len(self.calls) >= min((self.remote or {}).get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"]):
+            return "AGENT_CAPACITY_EXHAUSTED: Capacité simultanée de la sonde atteinte."
+        if sum(c.account is account for c in self.calls.values()) >= account.config["max_calls"]:
+            return "ACCOUNT_CAPACITY_EXHAUSTED: Capacité simultanée du compte SIP atteinte."
+        return None
+
     def capacity(self, account):
-        return (
-            not self.maintenance.refresh()
-            and (self.load_average() or 0)
-            < max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5)
-            and len(self.calls)
-            < min((self.remote or {}).get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"])
-            and sum(c.account is account for c in self.calls.values())
-            < account.config["max_calls"]
-        )
+        return self.capacity_reason(account) is None
 
     def pending_report(self, run_id, metrics):
         self.recent_runs.insert(
@@ -765,27 +779,54 @@ class Agent:
             self.db.execute("DELETE FROM incoming_active WHERE run_id=?", (run_id,))
             self.db.commit()
 
+    def respond_incoming(self):
+        """Run SIP responses on the event thread after native callbacks unwind."""
+        for call in [*self.calls.values(), *self.rejected]:
+            status = call.pending_response
+            if status is None:
+                continue
+            call.pending_response = None
+            if call.finished:
+                continue
+            op = pj.CallOpParam()
+            op.statusCode = status
+            try:
+                call.answer(op)
+            except pj.Error:
+                call.hangup_safe()
+
     def store_active(self, run_id):
         with self.lock:
             self.db.execute("INSERT OR IGNORE INTO active VALUES (?)", (run_id,))
             self.db.commit()
 
-    def revoke_configuration(self):
-        for call in self.calls.values():
-            call.hangup_safe()
+    def retire_revoked_accounts(self):
+        if not getattr(self, "accounts_revoked", False) or self.calls or any(not c.finished for c in self.rejected):
+            return
         for account in self.accounts.values():
             account.shutdown()
         self.accounts.clear()
+        self.accounts_revoked = False
+
+    def revoke_configuration(self):
+        self.accounts_revoked = True
         self.prepared.clear()
+        for call in list(self.calls.values()):
+            call.hangup_safe()
         self.remote = None
         self.remote_fingerprint = None
+        self.retire_revoked_accounts()
 
     def apply_config(self, config):
         fingerprint = json.dumps(config, sort_keys=True)
-        if fingerprint == self.remote_fingerprint or self.calls:
+        if fingerprint == self.remote_fingerprint:
+            self.configuration_applied_revision = config.get("configuration_revision")
+            return
+        if self.calls:
             return
         if config["id"] != self.cfg["id"]:
             raise ValueError("Controller identity mismatch")
+        self.retire_revoked_accounts()
         self.remote = config
         self.journal.secrets = self.safe_secrets()
         self.cfg["name"] = config["name"]
@@ -881,6 +922,7 @@ class Agent:
             )
 
         self.remote_fingerprint = fingerprint
+        self.configuration_applied_revision = config.get("configuration_revision")
 
     def execute(self, command):
         cid = command["id"]
@@ -903,25 +945,33 @@ class Agent:
                 self.prepared.pop(rid, None)
             else:
                 account = self.accounts.get(payload["account_id"])
-                if not account or account.registration_code != 200 or not account.registration_active:
-                    raise ValueError("Compte SIP non enregistré.")
+                if not account:
+                    raise ValueError("ACCOUNT_NOT_CONFIGURED: Compte SIP absent de la configuration locale.")
+                if account.registration_code != 200 or not account.registration_active:
+                    raise ValueError("ACCOUNT_NOT_REGISTERED: Compte SIP non enregistré.")
                 if not self.capacity(account):
-                    raise ValueError("Capacité maximale atteinte.")
+                    raise ValueError(self.capacity_reason(account) or "AUTHORIZATION_REQUIRED: Autorisation de la sonde absente ou expirée.")
                 mode = (self.remote or {}).get("mode", "standby")
-                if (
-                    payload.get("audio_profile") != "tone-1000"
-                    or not 1 <= payload["duration_s"] <= min(300, account.config.get("max_duration_s",300))
-                ):
-                    raise ValueError("Profil audio ou durée incompatibles avec le compte SIP.")
+                if payload.get("audio_profile") != "tone-1000":
+                    raise ValueError("AUDIO_PROFILE_UNSUPPORTED: Profil audio incompatible.")
+                duration = payload.get("duration_s")
+                if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 1 <= duration <= min(300, account.config.get("max_duration_s", 300)):
+                    raise ValueError("DURATION_INVALID: Durée invalide ou supérieure à la limite du compte SIP.")
+                if payload.get("preferred_codec") and payload["preferred_codec"] not in account.config.get("codecs", []):
+                    raise ValueError("CODEC_UNSUPPORTED: Codec absent de la configuration du compte SIP.")
                 if command["kind"] == "prepare":
-                    if mode not in ("receiver", "bidirectional"):
-                        raise ValueError("Réception désactivée sur cette sonde.")
+                    if mode not in ("receiver", "bidirectional") or account.config.get("call_mode") == "caller":
+                        raise ValueError("INCOMING_DISABLED: Réception désactivée sur cette sonde ou ce compte SIP.")
                     self.prepared[rid] = payload | {"expires": time.monotonic() + 45}
                 elif command["kind"] == "call":
-                    if mode not in ("caller", "bidirectional"):
-                        raise ValueError("Appels sortants désactivés sur cette sonde.")
+                    if mode not in ("caller", "bidirectional") or account.config.get("call_mode") == "receiver":
+                        raise ValueError("OUTGOING_DISABLED: Appels sortants désactivés sur cette sonde ou ce compte SIP.")
+                    if payload.get("server") != account.config["server"]:
+                        raise ValueError("SIP_SERVER_MISMATCH: Serveur SIP différent de la configuration locale.")
                     if not outgoing_allowed(account.config, payload):
-                        raise ValueError("Destination publique non autorisée ou compte en réception seule.")
+                        if account.config.get("destination_policy") != "account-public-v1":
+                            raise ValueError("LEGACY_DESTINATION_DENIED: Destination refusée par l’ancienne politique de la sonde ; mise à jour nécessaire.")
+                        raise ValueError("PUBLIC_CALLS_DISABLED: Destination publique non autorisée par le compte SIP.")
                     if rid in self.calls:
                         raise ValueError("Duplicate execution")
                     call = ProbeCall(account, rid, payload["duration_s"])
@@ -956,7 +1006,7 @@ class Agent:
                     raise ValueError("Unknown command")
         except (ValueError, pj.Error) as rejected:
             ok = False
-            error = str(rejected)[:200] if isinstance(rejected, ValueError) else "Erreur du moteur SIP : code " + str(getattr(rejected, "status", "inconnu"))
+            error = str(rejected)[:200] if isinstance(rejected, ValueError) else "PJSIP_ERROR: Erreur du moteur SIP : code " + str(getattr(rejected, "status", "inconnu"))
             self.last_error = error
             self.journal.record("call", error, level="error", run_id=rid)
         with self.lock:
@@ -966,6 +1016,7 @@ class Agent:
             self.db.commit()
 
     def api(self, method, path, **kwargs):
+        self.controller_last_endpoint = method + " /api/agent/" + path
         return requests.request(
             method,
             self.cfg["controller_url"] + "/api/agent/" + path,
@@ -1122,19 +1173,43 @@ class Agent:
                             "UPDATE commands SET acked=1 WHERE id=?", (cid,)
                         )
                         self.db.commit()
+                if (self.remote or {}).get("maintenance_protocol") == 1 and self.remote_update.capability()["enabled"]:
+                    maintenance = self.api("GET", "maintenance")
+                    maintenance.raise_for_status()
+                    action = maintenance.json().get("action")
+                    if action:
+                        try:
+                            self.remote_update.request(action)
+                        except (ValueError, OSError):
+                            if isinstance(action, dict) and isinstance(action.get("id"), str) and re.fullmatch(r"[a-f0-9-]{36}", action["id"]):
+                                failure = self.api("POST", "maintenance/" + action["id"], json={"id": action["id"], "state": "failed", "target_version": action.get("target_version"), "error_code": "LOCAL_HANDOFF_REJECTED", "stage": "Relais local indisponible ou requête refusée."})
+                                failure.raise_for_status()
+                    result = self.remote_update.result()
+                    if result:
+                        acknowledgement = self.api("POST", "maintenance/" + result["id"], json=result)
+                        acknowledgement.raise_for_status()
+                revision = getattr(self, "configuration_applied_revision", None)
+                if revision and revision != getattr(self, "configuration_ack_sent", None):
+                    response = self.api("POST", "configuration/ack", json={"revision": revision})
+                    if response.status_code == 409:
+                        fresh = self.api("GET", "config")
+                        fresh.raise_for_status()
+                        self.inbox.put(("config", (generation, fresh.json())))
+                    else:
+                        response.raise_for_status()
+                        self.configuration_ack_sent = revision
                 if not self.maintenance.refresh():
                     r = self.api("GET", "commands")
                     r.raise_for_status()
-                    for c in r.json()["commands"]:
+                    batch = r.json()
+                    if batch.get("configuration_required"):
+                        fresh = self.api("GET", "config")
+                        fresh.raise_for_status()
+                        self.inbox.put(("config", (generation, fresh.json())))
+                    for c in batch["commands"]:
                         self.inbox.put(("command", (generation, c)))
                 for rid, payload in reports:
-                    r = self.api(
-                        "POST", ("incoming/" if "incoming" in json.loads(payload) else "runs/") + rid + "/report", json=json.loads(payload)
-                    )
-                    r.raise_for_status()
-                    with self.lock:
-                        self.db.execute("DELETE FROM reports WHERE run_id=?", (rid,))
-                        self.db.commit()
+                    self.report_outbox.deliver(rid, payload, self.api)
             except (requests.RequestException, ValueError, KeyError, OSError) as e:
                 if self.controller_connected:
                     self.journal.record(
@@ -1276,6 +1351,7 @@ class Agent:
                     self.last_error = "SIP configuration could not be applied"
                     self.remote_fingerprint = None
                 now = time.monotonic()
+                self.respond_incoming()
                 for rid, call in list(self.calls.items()):
                     if call.answer_at is not None and now >= call.answer_at and not call.finished:
                         call.answer_at = None
@@ -1295,6 +1371,7 @@ class Agent:
                         del self.calls[rid]
                 call = None
                 self.rejected = [c for c in self.rejected if not c.finished]
+                self.retire_revoked_accounts()
                 self.prepared = {
                     k: v for k, v in self.prepared.items() if v["expires"] > now
                 }

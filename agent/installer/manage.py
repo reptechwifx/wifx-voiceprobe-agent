@@ -31,8 +31,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
-INSTALLER_VERSION = '1.0.1'
+INSTALLER_VERSION = '1.0.2'
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MIN_FREE = 512 * 1024 * 1024
 
@@ -453,6 +454,7 @@ class Manager:
 
     def progress(self,number,message):
         self.stage=message;print('['+str(number)+'/7] '+message+'.',flush=True)
+        if getattr(self,'remote_operation',None):self.remote_result(self.remote_operation,'running')
 
     def source(self):
         base=self.args.source or self.settings.get('source')
@@ -850,6 +852,7 @@ exit 0
         source=self.source()
         with tempfile.TemporaryDirectory(prefix='voiceprobe-download-') as folder:
             folder=Path(folder);manifest=source.manifest(folder,self.settings.get('sequence',0))
+            if getattr(self.args,'requested_version',None):need(manifest['version']==self.args.requested_version,'Version demandée différente du manifeste signé actuel.')
             self.progress(2,'Architecture et manifeste signé vérifiés')
             installed=self.settings.get('release',{})
             if installed.get('release_id')==manifest['release_id']:
@@ -1158,8 +1161,82 @@ exit 0
                 print('Résultat mise à jour planifiée : '+str(result.returncode),flush=True)
             time.sleep(15)
 
+    def remote_result(self, request, state, error_code=None):
+        result={'id':request['id'],'state':state,'target_version':request['target_version'],'stage':self.stage,'updated_at':time.time()}
+        if error_code:result['error_code']=error_code
+        if state=='updater_verified':result['installed_version']=(self.read_status() or {}).get('version')
+        folder=self.code/'remote-operations';safe_directory(folder,create=True)
+        atomic(folder/(request['id']+'.json'),result)
+        atomic(self.data/'.remote-update-result.json',result,0o644)
+        return result
+
+    def remote_apply(self):
+        path=self.data/'.remote-update-request.json'
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+        with os.fdopen(fd) as stream:
+            info=os.fstat(stream.fileno())
+            need(stat.S_ISREG(info.st_mode) and not info.st_mode&0o077 and info.st_size<=4096,'Requête locale non sûre.')
+            request=json.load(stream)
+        need(isinstance(request,dict) and set(request)=={'kind','id','target_version','created_at','expires'} and request['kind']=='UPDATE_AGENT','Action de maintenance inconnue.')
+        need(isinstance(request['id'],str) and str(uuid.UUID(request['id']))==request['id'] and isinstance(request['target_version'],str) and re.fullmatch(r'0\.9-\d{3}',request['target_version']),'Version ou identifiant de maintenance invalide.')
+        journal=self.code/'remote-operations'/(request['id']+'.json')
+        previous=private_json(journal) if journal.exists() else {}
+        need(not previous or previous['target_version']==request['target_version'],'Identifiant réutilisé pour une autre version.')
+        resumable=previous.get('state')=='running'
+        if previous.get('state') in ('updater_verified','failed'):
+            atomic(self.data/'.remote-update-result.json',previous,0o644)
+            if path.lstat().st_ino==info.st_ino:path.unlink()
+            return 'STATUS_OK'
+        self.remote_operation=request
+        self.remote_result(request,'running');self.args.requested_version=request['target_version']
+        try:
+            need(resumable or type(request['expires']) in (int,float) and time.time()<request['expires']<=time.time()+600 and type(request['created_at']) in (int,float) and time.time()-600<=request['created_at']<=time.time()+30,'Requête de maintenance expirée.')
+            self.recover();result=self.update()
+            need(result=='VERIFIED_SUCCESS' and (self.read_status() or {}).get('version')==request['target_version'],'Version finale non vérifiée.')
+            self.remote_result(request,'updater_verified')
+        except (Failure,OSError,ValueError,KeyError,subprocess.SubprocessError) as rejected:
+            self.stage = str(rejected)[:200] if isinstance(rejected,Failure) else 'Erreur locale contrôlée : '+type(rejected).__name__
+            self.remote_result(request,'failed','OFFICIAL_UPDATER_CONTROLLED_FAILURE');raise
+        finally:
+            try:
+                if path.lstat().st_ino==info.st_ino:path.unlink()
+            except FileNotFoundError:pass
+        return result
+
+    def remote_enable(self):
+        need(self.settings.get('release') and self.cfg.is_file(),'Installation gérée requise avant activation distante.')
+        need(self.code.stat().st_uid==0 and not self.code.stat().st_mode&0o022 and self.settings_path.stat().st_uid==0,'Gestionnaire et configuration root non modifiables par l’Agent requis.')
+        if self.args.backend=='native':
+            name='voiceprobe-agent-remote-update';service=Path('/etc/systemd/system')/(name+'.service');path=Path('/etc/systemd/system')/(name+'.path')
+            for unit in [service,path]:need(not unit.is_symlink() and (not unit.exists() or 'WIFX Voice Probe remote' in unit.read_text()),'Unité homonyme étrangère.')
+            service.write_text('[Unit]\nDescription=WIFX Voice Probe remote update\nStartLimitIntervalSec=60\nStartLimitBurst=3\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 '+str(self.code/'admin/manage.py')+' remote-apply --strict --backend native\nTimeoutStartSec=1800\nUMask=0077\n')
+            path.write_text('[Unit]\nDescription=WIFX Voice Probe remote request\n[Path]\nPathExists='+str(self.data/'.remote-update-request.json')+'\nUnit='+name+'.service\n[Install]\nWantedBy=multi-user.target\n')
+            service.chmod(0o644);path.chmod(0o644);command(['systemctl','daemon-reload']);command(['systemctl','enable','--now',name+'.path'])
+        else:
+            engine=self.backend.engine;name='voiceprobe-agent-remote-updater-'+self.args.instance;current=engine.call('GET','/containers/'+name+'/json')
+            if current:
+                need((current['Config'].get('Labels') or {}).get('net.wifx.project')=='voiceprobe-agent-remote-updater','Conteneur de maintenance homonyme étranger.')
+                if not current['State']['Running']:engine.call('POST','/containers/'+current['Id']+'/start')
+            else:
+                root=str(safe_directory(self.args.data_root));image=self.backend.capture()['local_image_id']
+                config={'Image':image,'User':'0:0','Healthcheck':{'Test':['NONE']},'Entrypoint':['python3'],'Cmd':[str(self.code/'admin/manage.py'),'remote-watch','--strict','--backend','docker','--data-root',root,'--instance',self.args.instance],
+                  'Labels':{'net.wifx.project':'voiceprobe-agent-remote-updater','net.wifx.instance':self.args.instance},
+                  'HostConfig':{'NetworkMode':'host','RestartPolicy':{'Name':'unless-stopped'},'Binds':['/var/run/docker.sock:/var/run/docker.sock:rw',root+':'+root+':rw'],'SecurityOpt':['no-new-privileges:true'],'LogConfig':{'Type':'json-file','Config':{'max-size':'5m','max-file':'3'}}}}
+                value=engine.call('POST','/containers/create?name='+name,config);engine.call('POST','/containers/'+value['Id']+'/start')
+        atomic(self.data/'.remote-update-enabled.json',{'protocol':1,'backend':self.args.backend},0o644)
+        print('Maintenance distante activée : uniquement les distributions signées du canal déjà configuré.')
+        return 'STATUS_OK'
+
+    def remote_watch(self):
+        need(self.args.backend=='docker','Worker réservé aux instances Docker gérées.')
+        while True:
+            if (self.data/'.remote-update-request.json').exists():
+                subprocess.run([sys.executable,str(self.code/'admin/manage.py'),'remote-apply','--strict','--backend','docker','--data-root',self.args.data_root,'--instance',self.args.instance],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            time.sleep(2)
+
     def execute(self):
         if self.args.action=='watch':return self.watch()
+        if self.args.action=='remote-watch':return self.remote_watch()
         if self.args.action in ('status','diagnose'):return self.report_status()
         if self.args.action=='version':
             status=self.read_status() or {}
@@ -1171,6 +1248,8 @@ exit 0
         with (self.code/'management.lock').open('a') as lock:
             try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:raise Failure('Autre opération Agent en cours ; aucune action concurrente.') from None
+            if self.args.action=='enable-remote-update':return self.remote_enable()
+            if self.args.action=='remote-apply':return self.remote_apply()
             if self.args.action=='enable-schedule':return self.schedule(True)
             if self.args.action=='disable-schedule':return self.schedule(False)
             if self.args.action in ('configure','reset-password'):
@@ -1188,7 +1267,7 @@ class Parser(argparse.ArgumentParser):
 def main(argv=None):
     args=list(sys.argv[1:] if argv is None else argv);strict='--strict' in args
     parser=Parser(description=__doc__)
-    parser.add_argument('action',choices=['install','update','status','diagnose','rollback','version','help','configure','reset-password','enable-schedule','disable-schedule','watch'],nargs='?',default='help')
+    parser.add_argument('action',choices=['install','update','status','diagnose','rollback','version','help','configure','reset-password','enable-schedule','disable-schedule','watch','enable-remote-update','remote-apply','remote-watch'],nargs='?',default='help')
     parser.add_argument('--backend',choices=['native','docker'],default='native')
     parser.add_argument('--instance',default='default');parser.add_argument('--data-root',default='/var/lib/voiceprobe-agent')
     parser.add_argument('--strict',action='store_true');parser.add_argument('--check',action='store_true')

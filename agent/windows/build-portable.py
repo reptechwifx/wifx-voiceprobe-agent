@@ -20,6 +20,7 @@ def main():
     p.add_argument('--wheels', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--console', action='store_true')
+    p.add_argument('--expected-provisioning-spki-sha256')
     args = p.parse_args()
     if sys.platform != 'win32' or struct.calcsize('P') != 8 or sys.version_info[:2] != (3, 13):
         raise ValueError('Python Windows 3.13 x64 requis ; aucun remplacement de l’ABI.')
@@ -35,6 +36,11 @@ def main():
     subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-index', '--find-links', str(args.wheels.resolve()),
                     '--require-hashes', '--only-binary=:all:', '--disable-pip-version-check',
                     '-r', str(root/'agent/windows/requirements-build.lock')], check=True)
+    from cryptography.hazmat.primitives import serialization
+    public = serialization.load_pem_public_key((args.trust / policy['provisioning_public_key']).read_bytes())
+    spki = hashlib.sha256(public.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
+    if spki != policy['provisioning_key_sha256'] or (args.expected_provisioning_spki_sha256 and spki != args.expected_provisioning_spki_sha256):
+        raise ValueError('Racine de provisioning différente de celle du worker qualifié ; construction arrêtée.')
     def source_manifest():
         sources = sorted((root/'agent/src').glob('*.py')) + sorted((root/'agent/windows').rglob('*')) + [root/'agent/VERSION']
         sources = [f for f in sources if f.is_file() and f.name != 'gateway.py' and '__pycache__' not in f.parts]
@@ -46,7 +52,7 @@ def main():
                         str(root/'agent/windows/portable.spec')], env=env, check=True)
     if source_manifest() != source_hashes:
         raise ValueError('Sources modifiées pendant la construction ; candidat non qualifiable.')
-    receipt = {'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
+    receipt = {'trust': {'provisioning_spki_sha256': spki, 'lab_controller_url': policy['controller_url']}, 'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
     for f in sorted(args.output.glob('*.exe')):
         receipt['artifacts'].append({'file': f.name, 'bytes': f.stat().st_size,
                                     'sha256': hashlib.sha256(f.read_bytes()).hexdigest()})

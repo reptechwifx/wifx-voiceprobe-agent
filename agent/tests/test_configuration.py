@@ -166,6 +166,31 @@ class ConfigurationTest(unittest.TestCase):
         self.assertNotEqual(self.a.accounts[3].rtp_slot, self.a.accounts[5].rtp_slot)
         self.assertEqual(self.original.stopped, 1)
 
+    def test_configuration_ack_is_published_only_after_application_on_the_sip_thread(self):
+        self.a.configuration_applied_revision = "a" * 64
+        self.a.calls = {"existing": object()}
+        new = copy.deepcopy(self.config)
+        new["configuration_revision"] = "b" * 64
+        new["accounts"][0]["max_duration_s"] = 20
+        self.a.apply_config(new)
+        self.assertEqual("a" * 64, self.a.configuration_applied_revision)
+        self.a.calls.clear()
+        self.a.apply_config(new)
+        self.assertEqual("b" * 64, self.a.configuration_applied_revision)
+
+    def test_revocation_keeps_account_alive_until_call_report_has_finished(self):
+        call = types.SimpleNamespace(hangup_safe=lambda: None, account=self.original)
+        self.a.calls = {"existing": call}
+        self.a.prepared = {}
+        self.a.rejected = []
+        self.a.revoke_configuration()
+        self.assertEqual(0, self.original.stopped)
+        self.assertIn(1, self.a.accounts)
+        self.a.calls.clear()
+        self.a.retire_revoked_accounts()
+        self.assertEqual(1, self.original.stopped)
+        self.assertEqual({}, self.a.accounts)
+
 
 if __name__ == "__main__":
     unittest.main()

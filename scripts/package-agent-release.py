@@ -38,7 +38,7 @@ def pack(args):
         for folder in ['agent/src','agent/web','agent/installer']:
             for p in sorted((ROOT/folder).rglob('*')):
                 if p.is_file() and '__pycache__' not in p.parts:h.update(str(p.relative_to(ROOT)).encode()+p.read_bytes())
-        for name in ['VERSION','scripts/configure-agent.py','scripts/package-agent-release.py','infrastructure/agent/container-entrypoint.py','docs/installation/agent-public-template.md']:
+        for name in ['VERSION','agent/VERSION','scripts/configure-agent.py','scripts/package-agent-release.py','infrastructure/agent/container-entrypoint.py','docs/installation/agent-public-template.md']:
             h.update(name.encode()+(ROOT/name).read_bytes())
         revision=h.hexdigest()[:40]
     version=(ROOT/'agent/VERSION').read_text().strip();release_id=version+'-'+revision[:12]
@@ -131,9 +131,9 @@ CMD ["python3","agent/src/main.py"]
     tar.unlink()
     compatibility=json.loads((ROOT/'agent/installer/compatibility.json').read_text())
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
-    manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.1','sequence':args.sequence,'expires':int(time.time())+90*86400,
+    manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':dirty,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':['0.9-003','0.9-004','0.9-007'],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':['0.9-003','0.9-004','0.9-007','0.9-008'],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:
