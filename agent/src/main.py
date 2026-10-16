@@ -645,7 +645,8 @@ class Agent:
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
                 "distribution_platform": self.distribution_platform(),
                 "destination_policy": "account-public-v1",
-                "max_calls": self.cfg["max_calls"],
+                "max_calls": self.applied_capacity(),
+                "capacity_protocol": 2,
                 "media_clock": 16000,
                 "process_call_ceiling": 128,
                 "cpu_count": os.cpu_count(),
@@ -687,7 +688,7 @@ class Agent:
                 or self.cfg.get("metadata_authority") == "controller"
                 else "local"
             ),
-            "max_calls": min(remote.get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"]),
+            "max_calls": self.applied_capacity(),
             "local_max_calls": self.cfg["max_calls"],
             "controller_max_calls": remote.get("max_calls"),
             "maintenance": self.maintenance.status(),
@@ -732,14 +733,21 @@ class Agent:
         }
         return redact(result, self.safe_secrets())
 
+    def applied_capacity(self):
+        remote = self.remote or {}
+        if remote.get("capacity_protocol") == 2:
+            return int(remote["max_calls"])
+        return min(remote.get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"])
+
     def capacity_reason(self, account):
         if self.maintenance.refresh():
             return "MAINTENANCE_ACTIVE: Maintenance active."
-        if (self.load_average() or 0) >= max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5):
+        central = (self.remote or {}).get("capacity_protocol") == 2
+        if not central and (self.load_average() or 0) >= max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5):
             return "CPU_LOAD_EXCEEDED: Charge CPU excessive."
-        if len(self.calls) >= min((self.remote or {}).get("max_calls", self.cfg["max_calls"]), self.cfg["max_calls"]):
+        if len(self.calls) >= self.applied_capacity():
             return "AGENT_CAPACITY_EXHAUSTED: Capacité simultanée de la sonde atteinte."
-        if sum(c.account is account for c in self.calls.values()) >= account.config["max_calls"]:
+        if not central and sum(c.account is account for c in self.calls.values()) >= account.config["max_calls"]:
             return "ACCOUNT_CAPACITY_EXHAUSTED: Capacité simultanée du compte SIP atteinte."
         return None
 
@@ -827,6 +835,10 @@ class Agent:
         if config["id"] != self.cfg["id"]:
             raise ValueError("Controller identity mismatch")
         self.retire_revoked_accounts()
+        if config.get("capacity_protocol") == 2:
+            if type(config.get("max_calls")) is not int or not 1 <= config["max_calls"] <= 128:
+                raise ValueError("Capacité Controller invalide : moteur limité à 128 appels.")
+            self.cfg["max_calls"] = config["max_calls"]
         self.remote = config
         self.journal.secrets = self.safe_secrets()
         self.cfg["name"] = config["name"]

@@ -1,6 +1,7 @@
 """Native, read-only WIFX window and notification icon; no administrative API."""
 # SPDX-License-Identifier: GPL-3.0-or-later
 import os
+import math
 from pathlib import Path
 import re
 import sys
@@ -63,6 +64,12 @@ def badge_tone(text):
     if any(word in text.upper() for word in ('ATTENTE', 'COURS', 'PRÉVU')):
         return 'warning'
     return 'neutral'
+
+
+def metric_text(value, unit):
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        return '—'
+    return f'{value:.2f}'.replace('.', ',')+' '+unit
 
 
 def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None, lab=False, _event_observer=None):
@@ -146,10 +153,15 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
     work_area = w.RECT()
     has_work_area = bool(user.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0))
     if has_work_area:
-        scale = min(scale, (work_area.bottom-work_area.top-28)/747, (work_area.right-work_area.left-28)/636)
+        scale = min(scale, (work_area.bottom-work_area.top-80)/810, (work_area.right-work_area.left-48)/620)
     px = lambda value: round(value*scale)
-    left = work_area.left+(work_area.right-work_area.left-px(636))//2 if has_work_area else -2147483648
-    top = work_area.top+(work_area.bottom-work_area.top-px(747))//2 if has_work_area else -2147483648
+    # The logical layout is a client rectangle: calculate the outer frame explicitly.
+    frame = w.RECT(0, 0, px(620), px(810))
+    user.AdjustWindowRectEx.argtypes = [ctypes.POINTER(w.RECT), w.DWORD, w.BOOL, w.DWORD]
+    user.AdjustWindowRectEx(ctypes.byref(frame), 0x00CA0000, False, 0)
+    outer_width, outer_height = frame.right-frame.left, frame.bottom-frame.top
+    left = work_area.left+(work_area.right-work_area.left-outer_width)//2 if has_work_area else -2147483648
+    top = work_area.top+(work_area.bottom-work_area.top-outer_height)//2 if has_work_area else -2147483648
     def color(value):
         r, g, b = bytes.fromhex(value.lstrip('#'))
         return r | g << 8 | b << 16
@@ -293,6 +305,9 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
             tone = badge_tone(text) if key not in ('count', 'remaining') else 'normal'
             styles[values[key]] = (tone, tone if tone in backgrounds else 'white')
             user.SetWindowTextW(values[key], text)
+        for prefix, source in [('current', 'current_metrics'), ('average', 'session_metrics')]:
+            for key, unit in [('jitter_ms', 'ms'), ('loss_percent', '%'), ('rms_dbfs', 'dBFS'), ('audio_gap_s', 's')]:
+                user.SetWindowTextW(controls[prefix+'_'+key], metric_text((view.get(source) or {}).get(key), unit))
         user.SetWindowTextW(controls['ticket'], ticket_title(view))
         user.SetWindowTextW(controls['version'], 'Agent ' + str(view.get('version', ''))[:32] + (' · VERSION DE TEST — NON SIGNÉE AUTHENTICODE' if lab else ''))
         user.SetWindowTextW(controls['error'], str(view.get('diagnostic_message') or view.get('error') or '')[:150])
@@ -357,15 +372,15 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
                 def rectangle(x, y, width, height, brush):
                     rect = w.RECT(px(x), px(y), px(x+width), px(y+height))
                     user.FillRect(dc, ctypes.byref(rect), brushes[brush])
-                rectangle(0, 0, 620, 121, 'white')
+                rectangle(0, 0, 620, 105, 'white')
                 rectangle(0, 0, 620, 5, 'brand')
                 old_pen = gdi.SelectObject(dc, gdi.GetStockObject(8))
                 old_brush = gdi.SelectObject(dc, brushes['white'])
-                for y, height in ((171, 276), (465, 163)):
+                for y, height in ((143, 208), (356, 143), (507, 173)):
                     gdi.RoundRect(dc, px(22), px(y), px(598), px(y+height), px(16), px(16))
                 gdi.SelectObject(dc, old_brush)
                 gdi.SelectObject(dc, old_pen)
-                rectangle(22, 479, 4, 132, state['notice_tone'])
+                rectangle(22, 519, 4, 145, state['notice_tone'])
             user.EndPaint(hwnd, ctypes.byref(paint))
             return 0
         if message == 0x0002:
@@ -383,7 +398,7 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
         registered = True
         # Caption, system menu and standard minimize box; no maximize or resize.
         hwnd = user.CreateWindowExW(0, class_name, 'WIFX Voice Probe — Sonde de diagnostic', 0x00CA0000,
-                                     left, top, px(636), px(747), None, None, instance, None)
+                                     left, top, outer_width, outer_height, None, None, instance, None)
         if not hwnd:
             raise OSError('Création de la fenêtre WIFX impossible.')
         user.SendMessageW(hwnd, 0x0080, 0, small_icon)
@@ -399,18 +414,26 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
         user.SendMessageW(logo, 0x0172, 0, bitmap)
         control('STATIC', 'WIFX VOICE PROBE', 171, 28, 400, 31, font=title_font)
         control('STATIC', 'Sonde de diagnostic téléphonique', 173, 66, 390, 25, font=small_font)
-        controls['ticket'] = control('STATIC', 'Intervention WIFX', 27, 133, 560, 25, font=bold_font, background='page')
+        controls['ticket'] = control('STATIC', 'Intervention WIFX', 27, 113, 560, 25, font=bold_font, background='page')
         for index, (key, label) in enumerate(rows):
-            y = 187+index*31
-            control('STATIC', label, 39, y, 215, 24)
-            values[key] = control('STATIC', 'EN ATTENTE', 263, y-1, 315, 25, font=small_bold, extra=1)
-        controls['notice_title'] = control('STATIC', '', 40, 481, 530, 24, font=small_bold)
-        controls['notice_body'] = control('STATIC', '', 40, 512, 530, 107, font=small_font)
-        controls['error'] = control('STATIC', '', 28, 635, 555, 28, font=small_font, background='page')
-        styles[controls['error']] = ('bad', 'page')
-        controls['version'] = control('STATIC', '', 28, 672, 340, 24, font=small_font, background='page')
-        controls['minimize'] = control('BUTTON', 'Réduire', 382, 663, 98, 32, 1002, small_font)
-        controls['quit'] = control('BUTTON', 'Quitter', 490, 663, 98, 32, 1001, small_font)
+            y = 153+index*24
+            control('STATIC', label, 39, y, 215, 23)
+            values[key] = control('STATIC', 'EN ATTENTE', 263, y-1, 315, 23, font=small_bold, extra=1)
+        control('STATIC', 'Mesures', 38, 364, 180, 23, font=small_bold)
+        control('STATIC', 'Test(s) en cours', 220, 364, 174, 23, font=small_bold)
+        control('STATIC', 'Moyenne de la session', 403, 364, 183, 23, font=small_bold)
+        for index, (key, label) in enumerate([('jitter_ms','Jitter RTP moyen'), ('loss_percent','Pertes RTP'), ('rms_dbfs','Niveau audio reçu'), ('audio_gap_s','Interruptions audio')]):
+            y = 392+index*24
+            control('STATIC', label, 38, y, 180, 23, font=small_font)
+            controls['current_'+key] = control('STATIC', '—', 220, y, 174, 23, font=small_font)
+            controls['average_'+key] = control('STATIC', '—', 403, y, 183, 23, font=small_font)
+        controls['notice_title'] = control('STATIC', '', 40, 523, 530, 23, font=small_bold)
+        controls['notice_body'] = control('STATIC', '', 40, 553, 530, 117, font=small_font)
+        controls['error'] = control('STATIC', '', 28, 689, 555, 42, font=small_font, background='page')
+        styles[controls['error']] = ('neutral', 'page')
+        controls['version'] = control('STATIC', '', 28, 735, 560, 38, font=small_font, background='page')
+        controls['minimize'] = control('BUTTON', 'Réduire', 382, 772, 98, 30, 1002, small_font)
+        controls['quit'] = control('BUTTON', 'Quitter', 490, 772, 98, 30, 1001, small_font)
         user.ShowWindow(hwnd, 5)
         user.UpdateWindow(hwnd)
         add_tray(hwnd)

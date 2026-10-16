@@ -48,7 +48,7 @@ def prepare(job_path, catalog_path, output):
     item = catalog['templates'].get(job['template_id'])
     if not isinstance(item, dict) or set(item) != {'path', 'sha256', 'agent_version', 'qualification', 'provisioning_public_key_path', 'provisioning_key_sha256'}:
         raise WorkerError('UNKNOWN_TEMPLATE')
-    if item['qualification'] != 'lab' or item['agent_version'] not in ('0.9-004', '0.9-007', '0.9-008') or item['sha256'] != job['template_sha256']:
+    if item['qualification'] != 'lab' or item['agent_version'] not in ('0.9-004', '0.9-007', '0.9-008', '0.9-009') or item['sha256'] != job['template_sha256']:
         raise WorkerError('INCOMPATIBLE_TEMPLATE')
     template_path, public_path = Path(item['path']), Path(item['provisioning_public_key_path'])
     if not template_path.is_absolute() or not public_path.is_absolute():

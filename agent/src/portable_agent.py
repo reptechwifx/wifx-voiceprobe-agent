@@ -12,6 +12,7 @@ import certifi
 import requests
 
 from main import Agent
+from session_metrics import SessionMetrics, active_metrics
 from portable_runtime import (EphemeralIdentity, PortableError, PortableLease,
                               protect_temporary_directory, status_view)
 
@@ -47,6 +48,7 @@ class PortableAgent(Agent):
         self._temporary = None
         self._closed_session = False
         self.completed_tests = 0
+        self.session_metrics = SessionMetrics()
         try:
             self._temporary = tempfile.TemporaryDirectory(prefix='WIFX-VoiceProbe-')
             protect_temporary_directory(self._temporary.name)
@@ -261,15 +263,7 @@ class PortableAgent(Agent):
 
     def pending_report(self, run_id, metrics):
         self.completed_tests += 1
-        rtp = metrics.get('rtp') or {}
-        received = (rtp.get('rx') or {}).get('packets') if isinstance(rtp, dict) else None
-        audio = metrics.get('audio') or {}
-        if metrics.get('established') and type(received) is int and received == 0:
-            self._media_evidence = 'no_rtp'
-        elif type(received) is int and received > 0 and isinstance(audio, dict) and isinstance(audio.get('interrupted_s'), (int, float)) and audio['interrupted_s'] > 0:
-            self._media_evidence = 'degraded'
-        else:
-            self._media_evidence = None
+        self.session_metrics.add(metrics)
         return super().pending_report(run_id, metrics)
 
     def before_iteration(self):
@@ -294,7 +288,8 @@ class PortableAgent(Agent):
                         'completed_tests': self.completed_tests,
                         'recent_runs': self.recent_runs[:1], 'last_error': self.last_error,
                         'controller_error_category': getattr(self, 'controller_error_category', None),
-                        'media_evidence': getattr(self, '_media_evidence', None)}
+                        'current_metrics': active_metrics(list(self.calls.values())),
+                        'session_metrics': self.session_metrics.snapshot()}
             lease_view = self.lease.snapshot()
             if lease_view.get('support_reference') is None:
                 lease_view['support_reference'] = self.provision.get('support_reference')

@@ -335,6 +335,8 @@ def status_view(snapshot, lease):
         'authorization_remaining_seconds': lease.get('authorization_remaining_seconds') if authorized else 0,
         # Raw Controller/PJSIP exceptions can contain endpoints or credentials.
         'error': portable_diagnostic(snapshot, lease),
+        'current_metrics': {k: snapshot.get('current_metrics', {}).get(k) for k in ('jitter_ms', 'loss_percent', 'rms_dbfs', 'audio_gap_s')},
+        'session_metrics': {k: snapshot.get('session_metrics', {}).get(k) for k in ('jitter_ms', 'loss_percent', 'rms_dbfs', 'audio_gap_s')},
     }
 
 
@@ -420,8 +422,5 @@ def portable_diagnostic(snapshot, lease):
     codes = [a.get('registration_code', 0) for a in accounts if isinstance(a, dict)]
     if any(isinstance(code, int) and code >= 400 for code in codes):
         return 'Enregistrement téléphonique refusé ; contacter WIFX.'
-    media = snapshot.get('media_evidence')
-    if media == 'no_rtp': return 'Appel établi, mais aucun média reçu. Causes possibles : réseau, NAT ou équipement téléphonique.'
-    if media == 'degraded': return 'Audio reçu avec une qualité dégradée.'
     if snapshot.get('last_error'): return 'Connexion WIFX indisponible.'
     return ''
