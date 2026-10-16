@@ -10,4 +10,4 @@ Droits sudo ou session root autorisée (omettre sudo dans ce dernier cas), termi
 
 Mise à jour : `sudo voiceprobe-agent update`. Identité, adoption, comptes SIP, identifiants et historique sont conservés. Service systemd actif au boot.
 
-[Résultats et limites](qualification-1.0.1.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).
+[Résultats et limites](qualification-1.0.2.md) · [Signatures](signatures.md) · [Diagnostic](diagnostic.md).

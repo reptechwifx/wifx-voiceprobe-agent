@@ -9,7 +9,7 @@
 
 **Windows portable x64 — 0.4.0-LAB, QUALIFIÉ EN LAB — NON SIGNÉ AUTHENTICODE.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
 
-Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-007 · installateurs 1.0.1 · PJSIP/PJSUA2 2.16 précompilé.**
+Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-008 · installateurs 1.0.2 · PJSIP/PJSUA2 2.16 précompilé.**
 
 ¹ Synology : profil logiciel BusyBox/Container Manager vérifié en laboratoire ; aucun NAS physique n’a été testé. L’architecture est Intel x86-64, jamais ARM. Les commandes ci-dessus sont interactives ; SSH avec terminal et droits sudo est requis. En session root autorisée, omettre `sudo`.
 
@@ -61,7 +61,7 @@ Une interruption se reprend avec la même commande. Une perte du mot de passe n�
 
 ## Téléchargements, signatures et licences
 
-[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-007-installer-1.0.1) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-007-installer-1.0.1/SHA256SUMS) · [Qualification](docs/qualification-1.0.1.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
+[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-008-installer-1.0.2) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-008-installer-1.0.2/SHA256SUMS) · [Qualification](docs/qualification-1.0.2.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
 
 Les manifestes sont signés RSA4096/SHA256 avec une racine de production épinglée dans le bootstrap. Empreinte SPKI SHA-256 : `f65020bb2c6139ba381094533afa0a28fbf3b34f7d6203f2a140b9ce999fde55`. TLS protège le premier téléchargement officiel ; les signatures authentifient ensuite les catalogues et empreintes. Les séquences et expirations sont vérifiées. Les images sont des archives publiques importées automatiquement et vérifiées par identité immuable ; aucun GHCR/Registry privé client n’est requis.
 
@@ -76,8 +76,8 @@ Pour retirer l’Agent du service sans détruire ses données, terminer les appe
 Plateformes non qualifiées : Ubuntu22.04, autres Debian, ARM64, NAS Synology physique et réseau IPv6 réel. SIP TLS n’est pas annoncé qualifié par les essais UDP/TCP. Temps observés en LAB : Ubuntu286s, Debian182s, Docker avec daemon vierge35s ; ils dépendent du réseau, des dépôts système et du matériel. Aucun test n’a utilisé un Controller WIFX, une sonde ou un NAS de production.
 
 
-### Correctifs008 en préparation de publication
+### Stabilité et mises à jour008
 
-Le candidat008 corrige un chemin de crash natif à la réponse entrante et conserve les rapports après redémarrage sans bloquer la communication. Il distingue les causes de refus SIP et acquitte les configurations effectivement appliquées. Le SDK PJSIP2.16 précompilé est réutilisé. Les commandes publiques et liens de Release ci-dessus restent ceux du canal déjà publié jusqu’à qualification des nouveaux artefacts.
+La version008 corrige un chemin de crash natif à la réponse entrante et conserve les rapports après redémarrage sans bloquer la communication. Il distingue les causes de refus SIP et acquitte les configurations effectivement appliquées. Le SDK PJSIP2.16 précompilé est réutilisé. Les commandes ci-dessus utilisent les fichiers publics de la Release008, vérifiés depuis des VM Ubuntu, Debian et Docker sans authentification.
 
 La maintenance distante008 réutilise exclusivement l’updater officiel. Elle exige une activation locale explicite du relais privilégié sur chaque installation gérée ; les anciens Agents ne l’acquièrent pas par une commande du Controller. Linux : `sudo voiceprobe-agent enable-remote-update`. Docker : `sudo voiceprobe-agent-docker enable-remote-update` (avec l’instance appropriée). Aucun shell distant, aucun démarrage d’un Agent hors ligne ni mise à jour automatique non demandée. Windows conserve le parcours nouvel EXE personnalisé et l’identité CNG.
