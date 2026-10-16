@@ -1,10 +1,10 @@
 schema=1
-expires=1799898005
-docker_id1=sha256:c2744a6358fe22741f967f58e8c7dc5c9bf52186866b45cb2b9bc4e152cb5204
-docker_id2=sha256:b27e6a2c311f7c4124e9fe41207a7862912811cf4bc18bde2fe0008190c116e9
+expires=1799906534
+docker_id1=sha256:53cc3c33fcfb346072b41174e6430e2934b2dfcc6c44fd9b47a54273af4ea65a
+docker_id2=sha256:251aa00fa2dc38841e67e8fc7f7d5abb9e891d5638840812acace7bab4c1954e
 manager=agent-manager-28ae0907ee4d.py
 manager_sha256=28ae0907ee4d83dfa41212d517dcbfea41ad2377aa5630c9961c4b8231030d5f
-docker=voiceprobe-agent-image-0.9-008-abcfe69d0351.tar.gz
-docker_sha256=94adeb6ef7576bb9f0623dd2551492bf750f9f9a36c32e05c042375ff7b8b7a3
-docker_reference=voiceprobe-agent-runtime:0.9-008-abcfe69d0351
-artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-008-installer-1.0.2
+docker=voiceprobe-agent-image-0.9-009-2c4856328695.tar.gz
+docker_sha256=d55122733efe260d0ed3301f1061275f307b430e5f29bf844d00399cd8cb8879
+docker_reference=voiceprobe-agent-runtime:0.9-009-2c4856328695
+artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-009-installer-1.0.2

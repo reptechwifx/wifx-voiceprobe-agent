@@ -2,11 +2,11 @@
   "schema": 1,
   "installer_protocol": 1,
   "installer_version": "1.0.2",
-  "sequence": 2026101605,
-  "expires": 1799898005,
-  "version": "0.9-008",
-  "release_id": "0.9-008-abcfe69d0351",
-  "source_revision": "abcfe69d03514d405d90c1459fe86fbcce28d1d1",
+  "sequence": 2026101606,
+  "expires": 1799906534,
+  "version": "0.9-009",
+  "release_id": "0.9-009-2c4856328695",
+  "source_revision": "2c4856328695dbf8e9ca654e8082ab43b8127f34",
   "development": false,
   "data_schema": 1,
   "rollback_compatible": true,
@@ -25,9 +25,9 @@
     "sha256": "28ae0907ee4d83dfa41212d517dcbfea41ad2377aa5630c9961c4b8231030d5f"
   },
   "agent": {
-    "name": "voiceprobe-agent-0.9-008-abcfe69d0351.tar.gz",
-    "bytes": 147641,
-    "sha256": "946f0876ef30ac5cd78c0474000e386fbd7a5487ae818ffedadadefcafc2c40b"
+    "name": "voiceprobe-agent-0.9-009-2c4856328695.tar.gz",
+    "bytes": 148803,
+    "sha256": "faaf1e8911f7476b3ca61ca702ea15b9c4c27d4c14e64fa7cd1aca5808d7a67d"
   },
   "runtimes": {
     "ubuntu-24.04-amd64-cp312": {
@@ -76,13 +76,13 @@
     }
   },
   "docker": {
-    "name": "voiceprobe-agent-image-0.9-008-abcfe69d0351.tar.gz",
-    "bytes": 143016609,
-    "sha256": "94adeb6ef7576bb9f0623dd2551492bf750f9f9a36c32e05c042375ff7b8b7a3",
-    "reference": "voiceprobe-agent-runtime:0.9-008-abcfe69d0351",
+    "name": "voiceprobe-agent-image-0.9-009-2c4856328695.tar.gz",
+    "bytes": 163542216,
+    "sha256": "d55122733efe260d0ed3301f1061275f307b430e5f29bf844d00399cd8cb8879",
+    "reference": "voiceprobe-agent-runtime:0.9-009-2c4856328695",
     "image_ids": [
-      "sha256:c2744a6358fe22741f967f58e8c7dc5c9bf52186866b45cb2b9bc4e152cb5204",
-      "sha256:b27e6a2c311f7c4124e9fe41207a7862912811cf4bc18bde2fe0008190c116e9"
+      "sha256:53cc3c33fcfb346072b41174e6430e2934b2dfcc6c44fd9b47a54273af4ea65a",
+      "sha256:251aa00fa2dc38841e67e8fc7f7d5abb9e891d5638840812acace7bab4c1954e"
     ],
     "rootfs_diff_ids": [
       "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
@@ -94,10 +94,12 @@
       "sha256:e63cb2561f6ea53ab1bb912cb4e198ed60f3d2bea92f2dfb916c1ecf0cc8f078",
       "sha256:4e8ba6e5b75a5cabf8f62fd4d04d357907497bd1fc0d7edae93d8397f20cfd18",
       "sha256:140e131fc942d711e5c5a43c696b1ff5df7b3e3001d76c270ee479a08efd13a4",
-      "sha256:73a9dde9d433a9d30c20065ce241bf242f8af1cd5346b346b7b340a2f411d1d1"
+      "sha256:73a9dde9d433a9d30c20065ce241bf242f8af1cd5346b346b7b340a2f411d1d1",
+      "sha256:a8f431dce125548be47bada8d62860afa5506bcbe4a7d89ddb9e66d68133a068",
+      "sha256:24f72e83c75db48f43043b10d0f68352d86d31aa85a9ebfbdb2544325ea4071b"
     ]
   },
-  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-008-installer-1.0.2",
+  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-009-installer-1.0.2",
   "corresponding_sources": [
     {
       "name": "corresponding-sources-agent-0.9-004.tar.gz",
