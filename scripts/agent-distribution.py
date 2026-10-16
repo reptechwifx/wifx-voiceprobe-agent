@@ -10,7 +10,7 @@ import subprocess
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ['install-agent.sh', 'install-agent-from-source.sh', 'update-agent.sh', 'uninstall-agent.sh', 'configure-agent.py', 'validate-agent-config.py', 'build-pjsip.sh', 'reset-agent-password.py', 'installation-info.py', 'agent-distribution.py']
+SCRIPTS = ['install-agent.sh', 'install-agent-from-source.sh', 'update-agent.sh', 'uninstall-agent.sh', 'configure-agent.py', 'validate-agent-config.py', 'build-pjsip.sh', 'instrument-pjsip.py', 'reset-agent-password.py', 'installation-info.py', 'agent-distribution.py']
 
 
 def members(root):

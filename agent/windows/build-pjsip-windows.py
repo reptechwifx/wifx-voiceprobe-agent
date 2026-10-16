@@ -77,6 +77,8 @@ def main():
     args.output.mkdir(parents=True, mode=0o700)
     safe_extract(args.source, args.work)
     tool = Path(__file__).resolve().parent
+    project = tool.parents[1]
+    subprocess.run(['python3', str(project/'scripts/instrument-pjsip.py'), str(args.work/'pjproject-2.16'), str(project/'agent/installer/rtp-observer.h')], check=True)
     with (args.work / "build-private.log").open("wb") as log:
         subprocess.run(DOCKER + ["build", "--pull=false", "-t", BUILDER, "-f", str(tool / "Dockerfile.pjsip-cross"), str(tool)], check=True, stdout=log, stderr=subprocess.STDOUT)
         command = DOCKER + ["run", "--rm", "--pull=never"]
@@ -87,7 +89,7 @@ def main():
     # Container-created files belong to root; read-only publication tools can consume them.
     dependencies = validate_dependencies((args.output / "pe-headers.txt").read_text())
     runtime_dependencies = validate_dependencies((args.output / "winpthread-pe-headers.txt").read_text(), runtime=True)
-    metadata = {"pjsip": "2.16", "python_abi": "cp313", "architecture": "AMD64", "cpu_baseline": "x86-64 generic", "source_sha256": SOURCE_SHA256, "codecs_required": ["G722", "PCMA", "PCMU"], "calls": 128, "accounts": 32, "sound": "null device", "sip_tls": False, "dependencies": dependencies, "runtime_dependencies": runtime_dependencies, "python_runtime_sha256": hashlib.sha256((sdk / "python313.dll").read_bytes()).hexdigest(), "builder_image": json.loads(subprocess.check_output(DOCKER + ["image", "inspect", BUILDER]))[0]["Id"], "windows_qualified": False}
+    metadata = {"pjsip": "2.16", "python_abi": "cp313", "architecture": "AMD64", "cpu_baseline": "x86-64 generic", "source_sha256": SOURCE_SHA256, "codecs_required": ["G722", "PCMA", "PCMU"], "calls": 128, "accounts": 32, "sound": "null device", "sip_tls": False, "dependencies": dependencies, "runtime_dependencies": runtime_dependencies, "python_runtime_sha256": hashlib.sha256((sdk / "python313.dll").read_bytes()).hexdigest(), "builder_image": json.loads(subprocess.check_output(DOCKER + ["image", "inspect", BUILDER]))[0]["Id"], "windows_qualified": False, "rtp_observer_protocol": 1, "observer_sha256": hashlib.sha256((project/"agent/installer/rtp-observer.h").read_bytes()).hexdigest()}
     (args.output / "binary.json").write_text(json.dumps(metadata, indent=2) + "\n")
     checksums = "".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in sorted(args.output.iterdir()) if path.is_file() and path.name != "SHA256SUMS")
     (args.output / "SHA256SUMS").write_text(checksums)

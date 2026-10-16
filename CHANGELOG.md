@@ -11,3 +11,7 @@ Sources et construction Windows x64, PJSIP/PJSUA2 2.16, Python 3.13.16 et interf
 ## Agent Bêta0.9-004 — installateurs1.0.0
 
 Première Release officielle publique signée ; PJSIP/PJSUA2 2.16 précompilé Ubuntu24.04/cp312, Debian12/cp311 et Docker AMD64. Canaux HTTPS GitHub signés et assets publics, sans accès privé client. Qualification réelle des installations, adoption, SIP/RTP/écho, préservation, rollback et reprise ; voir le rapport. Profil Synology logiciel uniquement, sans NAS physique. Aucun changement des moteurs SIP/RTP ou du Controller dans cette publication.
+
+## Agent 0.9-012
+
+Observations RTP/PJSIP réelles par réception : histogramme PDV relatif, pertes de lecture/distribution, intervalles de 2 s et capacité explicite. Aucun délai réseau inventé ni profil PLC WSOLA assimilé à Appendix I. MOS G.722 et G.711 avec pertes WSOLA restent indéterminés. Mise à jour Linux/Docker indépendante du Controller et sans réinstallation ; les EXE Windows existants restent indépendants.

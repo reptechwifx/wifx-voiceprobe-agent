@@ -14,6 +14,7 @@ from maintenance import Maintenance
 from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
+from rtp_quality import ReceiverQuality
 
 ADMIN_FIELDS = (
     "organization",
@@ -61,6 +62,8 @@ class ProbeCall(pj.Call):
         self.recorder = None
         self.media = None
         self.stats = {}
+        self.receiver_quality = ReceiverQuality()
+        self.last_quality_sample = 0.0
         self.codec = None
         self.events = []
         self.preferred = None
@@ -198,6 +201,10 @@ class ProbeCall(pj.Call):
             except Exception:
                 pass
 
+        self.collect_receiver_quality()
+        if self.receiver_quality.latest:
+            self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
+
         tx=self.stats.get("tx")
         if tx:
             feedback=tx.get("jitter_ms_mean") is not None or self.stats.get("rtt_ms_mean") is not None
@@ -220,7 +227,33 @@ class ProbeCall(pj.Call):
         except pj.Error:
             pass
 
+    def collect_receiver_quality(self, force=False):
+        if not hasattr(self, 'getVoiceProbeStats'):
+            return
+        current = time.monotonic()
+        if not force and current - self.last_quality_sample < 2.0:
+            return
+        self.last_quality_sample = current
+        try:
+            observation = json.loads(self.getVoiceProbeStats(0))
+            self.receiver_quality.add(observation)
+            self.receiver_quality.latest = self.receiver_quality.snapshot(self.codec or '')
+            self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
+        except pj.Error:
+            return
+        except (ValueError, KeyError, TypeError):
+            self.receiver_quality.valid = False
+            if self.receiver_quality.last:
+                self.receiver_quality.latest = self.receiver_quality.snapshot(self.codec or '')
+                self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
+
+    def onStreamDestroyed(self, prm):
+        self.collect_receiver_quality(force=True)
+        if self.receiver_quality.latest:
+            self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
+
     def hangup_safe(self):
+        self.collect_receiver_quality(force=True)
         try:
             self.hangup(pj.CallOpParam())
         except pj.Error:
@@ -641,6 +674,7 @@ class Agent:
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
+                "media_quality": {"protocol": 1, "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
                 "distribution_platform": self.distribution_platform(),
