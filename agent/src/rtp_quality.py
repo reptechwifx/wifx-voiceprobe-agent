@@ -28,11 +28,20 @@ class ReceiverQuality:
         self.end_ms = 0.0
         self.intervals = []
         self.latest = None
+        self.codecs = set()
+        self.format_stable = True
         self.last = None
 
-    def add(self, observation):
+    def add(self, observation, codec=None):
         if observation.get('protocol') != 1:
             raise ValueError('Unsupported receiver observation')
+        if codec:
+            if len(self.codecs) < 4:
+                self.codecs.add(codec.upper())
+            if len(self.codecs) > 1:
+                self.format_stable = False
+        if self.last and any(observation.get(key) != self.last.get(key) for key in ('frame_ms', 'plc_enabled')):
+            self.format_stable = False
         count = observation['samples']
         bins = observation['bins']
         if not isinstance(count, int) or not 0 <= count <= 1_000_000 or len(bins) > 16001:
@@ -52,6 +61,13 @@ class ReceiverQuality:
                 raise ValueError('Invalid receiver counter')
         if count and (observation['min_ms'] > observation['max_ms'] or not observation['min_ms'] * count - .001 <= observation['sum_ms'] <= observation['max_ms'] * count + .001):
             raise ValueError('Inconsistent receiver moments')
+        distribution = observation.get('distribution_protocol', 1)
+        if distribution not in (1, 2):
+            raise ValueError('Unsupported playout distribution')
+        if distribution == 2:
+            local_runs = observation.get('interval_loss_runs')
+            if type(local_runs) is not int or not 0 <= local_runs <= observation['lost'] or any(type(observation.get(k)) is not bool for k in ('interval_starts_lost', 'interval_ends_lost')):
+                raise ValueError('Invalid interval loss boundaries')
         end = observation['elapsed_ms']
         if not math.isfinite(end) or end < self.end_ms or len(self.intervals) >= MAX_INTERVALS:
             self.valid = False
@@ -71,21 +87,22 @@ class ReceiverQuality:
                 'count': count, 'min_ms': observation['min_ms'] if count else None, 'max_ms': observation['max_ms'] if count else None,
                 'sum_ms': observation['sum_ms'], 'p95_transit_ms': percentile(histogram, count, .25),
                 'jitter_ms_mean': observation['jitter_sum_ms'] / count if count else None,
-                'received': observation['received'], 'lost': observation['lost'], 'loss_runs': observation['loss_runs'],
+                'received': observation['received'], 'lost': observation['lost'], 'loss_runs': observation.get('interval_loss_runs', observation['loss_runs']),
+                'distribution_protocol': distribution, 'starts_lost': observation.get('interval_starts_lost'), 'ends_lost': observation.get('interval_ends_lost'),
                 'valid': bool(observation['valid'])})
         self.end_ms = end
         self.last = observation
         return self
 
-    def playout(self, codec, received, lost, runs):
+    def playout(self, codec, received, lost, runs, distribution=None):
         observation = self.last
         name = codec.upper().split('/')[0]
         # PJSIP's default G.711 PLC is WSOLA, not the G.711 Appendix I profile.
         profile = ('pjsip-wsola' if observation['plc_enabled'] else 'g711-no-plc') if name in ('PCMA', 'PCMU') else 'codec-profile-unqualified'
         probability = lost / (received + lost) if received + lost else 0
         burst = (lost / runs) * (1 - probability) if runs and lost else (1.0 if lost == 0 else None)
-        return {'valid': bool(self.valid and self.count >= 2), 'profile': profile, 'packetization_ms': observation['packetization_ms'], 'frame_ms': observation['frame_ms'],
-                'unit': 'decoder-frame', 'received': received, 'lost': lost, 'loss_runs': runs, 'burst_ratio': burst,
+        return {'valid': bool(self.valid and self.format_stable and self.count >= 2), 'format_stable': self.format_stable, 'observed_codecs': sorted(self.codecs), 'profile': profile, 'packetization_ms': observation['packetization_ms'], 'frame_ms': observation['frame_ms'],
+                'distribution_protocol': distribution or observation.get('distribution_protocol', 1), 'unit': 'decoder-frame', 'received': received, 'lost': lost, 'loss_runs': runs, 'burst_ratio': burst,
                 'warmup': 'Initial prefetch excluded until first normal decoded frame', 'source': 'pjmedia-jbuf-output-v1'}
 
     def snapshot(self, codec=''):
@@ -104,5 +121,5 @@ class ReceiverQuality:
             result['intervals'].append({'offset_s': interval['offset_s'], 'duration_s': interval['duration_s'],
                 'timing': {'method': 'rtp-arrival-v1', 'representation': 'transit-summary-v1', 'clock_stable': bool(self.valid and interval['valid']),
                            'ssrc': self.ssrc, 'reference_min_ms': self.minimum, 'resolution_ms': .25, 'summary': summary},
-                'playout': self.playout(codec, interval['received'], interval['lost'], interval['loss_runs']), 'jitter_ms_mean': interval['jitter_ms_mean']})
+                'playout': dict(self.playout(codec, interval['received'], interval['lost'], interval['loss_runs'], interval['distribution_protocol']), starts_lost=interval['starts_lost'], ends_lost=interval['ends_lost']), 'jitter_ms_mean': interval['jitter_ms_mean']})
         return result

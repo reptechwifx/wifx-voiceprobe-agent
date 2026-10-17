@@ -9,9 +9,11 @@
 
 **Windows portable x64 — 0.5.0-LAB, QUALIFIÉ EN LAB — NON SIGNÉ AUTHENTICODE.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
 
-Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-009 · installateurs 1.0.2 · PJSIP/PJSUA2 2.16 précompilé.**
+Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-013 · installateurs 1.0.2 · PJSIP/PJSUA2 2.16 précompilé.**
 
 ¹ Synology : profil logiciel BusyBox/Container Manager vérifié en laboratoire ; aucun NAS physique n’a été testé. L’architecture est Intel x86-64, jamais ARM. Les commandes ci-dessus sont interactives ; SSH avec terminal et droits sudo est requis. En session root autorisée, omettre `sudo`.
+
+[Qualification 0.9-013 et limites](docs/qualification-0.9-013.md) : mises à jour natives/Docker/DSM vérifiées ; aucun nouveau Windows ni test sur NAS physique.
 
 ## Avant de commencer
 

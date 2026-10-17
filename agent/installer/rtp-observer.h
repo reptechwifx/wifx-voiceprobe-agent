@@ -20,6 +20,7 @@ typedef struct vp_observer {
     pj_timestamp first_arrival, frequency;
     double minimum, maximum, sum, jitter, jitter_sum, last_transit, elapsed_ms;
     unsigned initialized, playback_started, previous_lost, valid, has_transit;
+    unsigned delta_started, delta_starts_lost; pj_uint64_t delta_local_runs;
     double packet_ms; unsigned variable_packet_ms;
 } vp_observer;
 
@@ -101,6 +102,8 @@ static void vp_playout(pjmedia_stream_common *base, char type, unsigned frames)
     if (type == PJMEDIA_JB_NORMAL_FRAME) v->playback_started = 1;
     if (!v->playback_started) return; /* exclude initial prefetch only */
     for (i=0; i<frames; ++i) {
+        if (type != PJMEDIA_JB_NORMAL_FRAME && (!v->previous_lost || !v->delta_started)) ++v->delta_local_runs;
+        if (!v->delta_started) { v->delta_starts_lost = type != PJMEDIA_JB_NORMAL_FRAME; v->delta_started = 1; }
         if (type == PJMEDIA_JB_NORMAL_FRAME) {
             ++v->received; ++v->delta_received; v->previous_lost = 0;
         } else {
@@ -133,7 +136,8 @@ PJ_DEF(pj_status_t) pjmedia_stream_voiceprobe(pjmedia_stream *stream, char *buff
     pj_get_timestamp(&now);
     if (v->initialized) v->elapsed_ms = 1000.0*(double)(now.u64-v->first_arrival.u64)/(double)v->frequency.u64;
 #define VP_OUT(...) do { if (!vp_append(buffer,capacity,&used,__VA_ARGS__)) { pj_mutex_unlock(base->jb_mutex); return PJ_ETOOSMALL; } } while (0)
-    VP_OUT("{\"protocol\":1,\"valid\":%s,\"ssrc\":\"%u\",\"elapsed_ms\":%.6f,\"samples\":%llu,\"min_ms\":%.6f,\"max_ms\":%.6f,\"sum_ms\":%.6f,\"jitter_sum_ms\":%.6f,\"resolution_ms\":0.25,\"received\":%llu,\"lost\":%llu,\"loss_runs\":%llu,\"total_received\":%llu,\"total_lost\":%llu,\"total_loss_runs\":%llu,\"duplicates\":%llu,\"reordered\":%llu,\"excluded\":%llu,\"overflow\":%llu,\"packetization_ms\":%.6f,\"frame_ms\":%.6f,\"plc_enabled\":%s,\"bins\":[",
+    VP_OUT("{\"distribution_protocol\":2,\"interval_loss_runs\":%llu,\"interval_starts_lost\":%s,\"interval_ends_lost\":%s,\"protocol\":1,\"valid\":%s,\"ssrc\":\"%u\",\"elapsed_ms\":%.6f,\"samples\":%llu,\"min_ms\":%.6f,\"max_ms\":%.6f,\"sum_ms\":%.6f,\"jitter_sum_ms\":%.6f,\"resolution_ms\":0.25,\"received\":%llu,\"lost\":%llu,\"loss_runs\":%llu,\"total_received\":%llu,\"total_lost\":%llu,\"total_loss_runs\":%llu,\"duplicates\":%llu,\"reordered\":%llu,\"excluded\":%llu,\"overflow\":%llu,\"packetization_ms\":%.6f,\"frame_ms\":%.6f,\"plc_enabled\":%s,\"bins\":[",
+      (unsigned long long)v->delta_local_runs, v->delta_starts_lost ? "true":"false", v->previous_lost ? "true":"false",
       v->initialized && v->valid ? "true":"false",v->ssrc,v->elapsed_ms,
       (unsigned long long)v->samples,v->minimum,v->maximum,v->sum,v->jitter_sum,
       (unsigned long long)v->delta_received,(unsigned long long)v->delta_lost,(unsigned long long)v->delta_runs,
@@ -143,7 +147,7 @@ PJ_DEF(pj_status_t) pjmedia_stream_voiceprobe(pjmedia_stream *stream, char *buff
     for (i=0;i<VP_BINS;++i) if (v->bins[i]) { VP_OUT("%s[%d,%u]",comma?",":"",(int)i-VP_ORIGIN,v->bins[i]);comma=1; }
     VP_OUT("]}");
     pj_bzero(v->bins,sizeof(v->bins));v->samples=0;v->sum=0;v->jitter_sum=0;
-    v->delta_received=v->delta_lost=v->delta_runs=0;
+    v->delta_received=v->delta_lost=v->delta_runs=v->delta_local_runs=0; v->delta_started=v->delta_starts_lost=0;
     pj_mutex_unlock(base->jb_mutex);
 #undef VP_OUT
     return PJ_SUCCESS;

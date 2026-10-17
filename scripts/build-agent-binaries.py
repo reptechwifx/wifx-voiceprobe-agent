@@ -27,7 +27,7 @@ assert all(any(x.codecId.startswith(k) for x in e.codecEnum2()) for k in ('G722/
 for path in (module,extension):shutil.copy2(path,root/path.name)
 subprocess.run(['strip','--strip-unneeded',str(root/extension.name)],check=True)
 shared=subprocess.check_output(['ldd',str(root/extension.name)],text=True);assert 'not found' not in shared
-metadata={'platform':sys.argv[1],'pjsip_version':'2.16','python':'.'.join(map(str,sys.version_info[:2])),'soabi':sysconfig.get_config_var('SOABI'),'glibc':platform.libc_ver()[1],'shared_libraries':shared,'source_sha256':'3af2e481d51aaa095897820fa2ee26c30e530590c6ca56d23e4133bbdad369eb','calls':128,'accounts':32,'codecs':['G722','PCMA','PCMU'],'cpu_baseline':'x86-64 generic','builder_image_id':sys.argv[4],'rtp_observer_protocol':1,'observer_sha256':pathlib.Path('/var/tmp/voiceprobe-pjsip-build/pjproject-2.16/voiceprobe-observer.sha256').read_text().strip()}
+metadata={'platform':sys.argv[1],'pjsip_version':'2.16','python':'.'.join(map(str,sys.version_info[:2])),'soabi':sysconfig.get_config_var('SOABI'),'glibc':platform.libc_ver()[1],'shared_libraries':shared,'source_sha256':'3af2e481d51aaa095897820fa2ee26c30e530590c6ca56d23e4133bbdad369eb','calls':128,'accounts':32,'codecs':['G722','PCMA','PCMU'],'cpu_baseline':'x86-64 generic','builder_image_id':sys.argv[4],'rtp_observer_protocol':1,'rtp_playout_distribution_protocol':2,'observer_sha256':pathlib.Path('/var/tmp/voiceprobe-pjsip-build/pjproject-2.16/voiceprobe-observer.sha256').read_text().strip()}
 (root/'binary.json').write_text(json.dumps(metadata,indent=2)+'\\n');shutil.copy2('/var/tmp/voiceprobe-pjsip-build/pjproject-2.16/COPYING',root/'COPYING')
 for path in root.iterdir():os.chown(path,int(sys.argv[2]),int(sys.argv[3]));path.chmod(0o644)
 '''

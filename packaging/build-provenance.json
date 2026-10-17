@@ -1,33 +1,16 @@
 {
-  "agent_version": "0.9-012",
+  "agent_version": "0.9-013",
   "installer_version": "1.0.2",
-  "release_source_revision": "083485272edf5b4b114e25776b89b43050bae908",
-  "runtime_sdk_sha256": {
-    "ubuntu-24.04-amd64-cp312": "1e765555fb1e21c4bd30ae3ae452f6f5ebc5d6cabff96a99f54424c6e21370e5",
-    "debian-12-amd64-cp311": "c787604b9dfd50199b3ef84f13d6caf85a523a4fd3a765ac1a6fdccfcba7e9fd"
-  },
-  "agent_image_ids": [
-    "sha256:ccf49c5217d6ca2ed0183cceaa3ee97d38c142768170850338d53e9a4f9c5b3e",
-    "sha256:4e83ed152e5afce64698ea0ed25070f69e2aa67b8542bb1e5b5bc66de826bb98"
-  ],
-  "agent_rootfs_diff_ids": [
-    "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
-    "sha256:1c9ac609ac753b2fae3426b10da2eb68eb65771256d7a46c529dc237e365fbb8",
-    "sha256:fb8e6d0ebbcb1b2fc84a6b5ba35769c6e0ec0f18dc813249af181d448ea73193",
-    "sha256:6ff6147cdbdc0bc7719d743d801e5a4b56bc6857ffbf5751e0c72cd5079089f2",
-    "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
-    "sha256:5078de4931103be7afc066b75550347102dc53e5737f4056fe38d5100a5bfcce",
-    "sha256:e63cb2561f6ea53ab1bb912cb4e198ed60f3d2bea92f2dfb916c1ecf0cc8f078",
-    "sha256:4e8ba6e5b75a5cabf8f62fd4d04d357907497bd1fc0d7edae93d8397f20cfd18",
-    "sha256:140e131fc942d711e5c5a43c696b1ff5df7b3e3001d76c270ee479a08efd13a4",
-    "sha256:73a9dde9d433a9d30c20065ce241bf242f8af1cd5346b346b7b340a2f411d1d1",
-    "sha256:a8f431dce125548be47bada8d62860afa5506bcbe4a7d89ddb9e66d68133a068",
-    "sha256:24f72e83c75db48f43043b10d0f68352d86d31aa85a9ebfbdb2544325ea4071b",
-    "sha256:f55b80637c2fd6e272874a885e7d04f795f69051881cb466e9246253c6bc15cc",
-    "sha256:5ae07b606c66e01803caabf2ac1200870a74b009cf5046f4dbf32d3291a06db9"
-  ],
+  "release_source_revision": "31454beb13b91421bcfdd0f958f04f84d2ec0e94",
   "rtp_observer_protocol": 1,
-  "observer_sha256": "2f00ded7297746798882b526c4da3824dc82db83bf161f75bd05ebaa3bd2ce66",
-  "construction": "Marc-Home; pinned PJSIP 2.16; no CI or target compilation",
-  "quality_limits": "PDV relative receiver transit. MOS G.711 zero observed playout loss only for WSOLA; WSOLA losses and G.722 remain indeterminate."
+  "distribution_protocol": 2,
+  "observer_sha256": "e21e5441ea880fd5521a39b840438242ac0ad5385ae32e9bf713c48877134efc",
+  "runtime_sdk_sha256": {
+    "ubuntu-24.04-amd64-cp312": "f31a7ae1572dcc7960110437d6b283a0f14dc60f19e0785c430d0a629f642516",
+    "debian-12-amd64-cp311": "9158f4b4ef5d48f86f8d40830a56030fbdaac08dc3ed362f30f7e123b3f7c0d7"
+  },
+  "quality_scope": "Receiver-erasure telemetry only; MOS G711 reference model is calculated by Controller013, not an actual WSOLA calibration. G722 MOS unqualified.",
+  "publication_status": "qualified",
+  "qualification": "docs/qualification-0.9-013.md",
+  "new_windows_binary": false
 }

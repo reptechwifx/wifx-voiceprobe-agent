@@ -43,7 +43,32 @@ class ReceiverPrecisionTest(unittest.TestCase):
         rows=self.observe('s 0\np 1 100 1000 1\nf 2 10\nf 1 20\nf 2 3\ns 2000\nf 2 2\nf 1 10\nf 2 1\np 51 8100 2010 1\ns 3000\n')
         self.assertEqual(rows[0],{'pending':3});a,b=rows[1:];self.assertEqual((a['received'],a['lost'],a['loss_runs']),(20,3,1));self.assertEqual((b['received'],b['lost'],b['loss_runs']),(10,3,1))
         self.assertEqual((b['total_received'],b['total_lost'],b['total_loss_runs']),(30,6,2))
-        q=ReceiverQuality();q.add(a);q.add(b);self.assertEqual(len(q.snapshot('PCMU')['intervals']),2)
+        self.assertEqual(a['distribution_protocol'], 2)
+        self.assertEqual((a['interval_loss_runs'], b['interval_loss_runs']), (1, 2))
+        self.assertFalse(a['interval_starts_lost']);self.assertTrue(a['interval_ends_lost'])
+        self.assertTrue(b['interval_starts_lost']);self.assertTrue(b['interval_ends_lost'])
+        q=ReceiverQuality();q.add(a);q.add(b);snapshot=q.snapshot('PCMU')
+        self.assertEqual(len(snapshot['intervals']),2)
+        self.assertEqual(snapshot['playout']['loss_runs'],2)
+        self.assertEqual(snapshot['intervals'][1]['playout']['loss_runs'],2)
+        self.assertEqual(snapshot['intervals'][1]['playout']['distribution_protocol'],2)
+
+    def test_codec_or_decoder_format_change_invalidates_mos_without_changing_pdv(self):
+        rows=self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 100\ns 2000\np 3 420 1040 1\nf 1 100\ns 3000\n')
+        q=ReceiverQuality().add(rows[0], 'G722/16000').add(rows[1], 'PCMA/8000')
+        snapshot=q.snapshot('PCMA/8000')
+        self.assertFalse(snapshot['playout']['valid'])
+        self.assertFalse(snapshot['playout']['format_stable'])
+        self.assertTrue(snapshot['timing']['clock_stable'])
+        self.assertEqual(snapshot['playout']['observed_codecs'], ['G722/16000','PCMA/8000'])
+
+    def test_old_protocol_stays_accepted_without_inventing_interval_boundaries(self):
+        row=self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 100\nf 2 2\ns 3000\n')[0]
+        for key in ['distribution_protocol','interval_loss_runs','interval_starts_lost','interval_ends_lost']:
+            row.pop(key)
+        snapshot=ReceiverQuality().add(row).snapshot('PCMA')
+        self.assertEqual(snapshot['playout']['distribution_protocol'],1)
+        self.assertIsNone(snapshot['intervals'][0]['playout']['starts_lost'])
 
     def test_ssrc_restart_and_extreme_transit_are_explicitly_invalid(self):
         for text in ['p 1 100 1000 1\np 2 260 1020 2\ns 1100\n','p 1 100 1000 1\np 2 260 4020 1\ns 4100\n']:

@@ -236,7 +236,7 @@ class ProbeCall(pj.Call):
         self.last_quality_sample = current
         try:
             observation = json.loads(self.getVoiceProbeStats(0))
-            self.receiver_quality.add(observation)
+            self.receiver_quality.add(observation, self.codec)
             self.receiver_quality.latest = self.receiver_quality.snapshot(self.codec or '')
             self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
         except pj.Error:
@@ -674,7 +674,7 @@ class Agent:
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
-                "media_quality": {"protocol": 1, "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
+                "media_quality": {"protocol": 1, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
                 "distribution_platform": self.distribution_platform(),
