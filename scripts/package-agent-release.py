@@ -114,7 +114,7 @@ CMD ["python3","agent/src/main.py"]
         base_ref=previous['docker']['reference']
         base=json.loads(run(['docker','image','inspect',base_ref]))[0]
         if base['Id'] not in previous['docker']['image_ids'] or base['RootFS']['Layers']!=previous['docker']['rootfs_diff_ids'] or base['Architecture']!='amd64' or base['Config']['Labels'].get('net.wifx.project')!='voiceprobe-agent':raise ValueError('Image Agent de référence non qualifiée.')
-        dockerfile='FROM '+base['Id']+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
+        dockerfile='FROM '+base_ref+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
     (context/'Dockerfile').write_text(dockerfile)
     docker=['docker','--host','unix:///var/run/docker.sock']
     if json.loads(run(docker+['info','--format','{{json .}}']))['Name']!='docker-desktop':raise ValueError('Construction exclusivement Docker Desktop Marc-Home.')
@@ -123,6 +123,7 @@ CMD ["python3","agent/src/main.py"]
     with (out/'build-private.log').open('wb') as log:
         subprocess.run(docker+['build','--pull=false','--platform','linux/amd64','--build-arg','BASE_IMAGE='+args.debian_base,'--build-arg','SOURCE_REVISION='+revision,'--build-arg','AGENT_VERSION='+version,'-t',ref,str(context)],check=True,stdout=log,stderr=subprocess.STDOUT)
     image=json.loads(run(docker+['image','inspect',ref]))[0]
+    if args.runtime_release and image['RootFS']['Layers'][:len(base['RootFS']['Layers'])] != base['RootFS']['Layers']:raise ValueError('Le runtime 017 signé n’est pas la base de la nouvelle image.')
     tar=out/'agent-image.tar';run(docker+['image','save','-o',str(tar),ref])
     with tarfile.open(tar) as archive:
         entries=json.load(archive.extractfile('manifest.json'));entry=entries[0];config=archive.extractfile(entry['Config']).read();config_id='sha256:'+hashlib.sha256(config).hexdigest()
