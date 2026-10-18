@@ -17,7 +17,7 @@ typedef struct vp_observer {
     pj_uint32_t ssrc, last_ts;
     pj_uint16_t last_seq;
     pj_int64_t extended_ts, first_ts;
-    pj_timestamp first_arrival, frequency;
+    pj_timestamp first_arrival, last_arrival, frequency;
     double minimum, maximum, sum, jitter, jitter_sum, last_transit, elapsed_ms;
     unsigned initialized, playback_started, previous_lost, valid, has_transit;
     unsigned delta_started, delta_starts_lost; pj_uint64_t delta_local_runs;
@@ -34,9 +34,16 @@ static void vp_rx(pjmedia_stream_common *base, const pjmedia_rtp_hdr *hdr,
     pj_int32_t timestamp_delta;
     pj_int64_t extended;
     double transit, elapsed;
-    int index;
+    int index; pj_timestamp frequency;
     if (!v || hdr->pt != base->si->rx_pt) return;
     pj_mutex_lock(base->jb_mutex);
+    if (pj_get_timestamp_freq(&frequency) != PJ_SUCCESS || !frequency.u64) {
+        v->valid = 0; ++v->excluded; pj_mutex_unlock(base->jb_mutex); return;
+    }
+    if (v->initialized && (frequency.u64 != v->frequency.u64 || arrival->u64 < v->last_arrival.u64)) {
+        v->valid = 0; ++v->excluded; pj_mutex_unlock(base->jb_mutex); return;
+    }
+    v->last_arrival = *arrival;
     if (!v->initialized) {
         if (pj_get_timestamp_freq(&v->frequency) != PJ_SUCCESS || !v->frequency.u64) {
             pj_mutex_unlock(base->jb_mutex); return;
@@ -129,12 +136,13 @@ PJ_DEF(pj_status_t) pjmedia_stream_voiceprobe(pjmedia_stream *stream, char *buff
 {
     pjmedia_stream_common *base = &stream->base;
     vp_observer *v = (vp_observer*)base->voiceprobe_quality;
-    pj_size_t used = 0; unsigned i, comma = 0; pj_timestamp now;
+    pj_size_t used = 0; unsigned i, comma = 0; pj_timestamp now, frequency;
     if (!v) return PJ_ENOTSUP;
     pj_mutex_lock(base->jb_mutex);
     if (!v->initialized) { pj_mutex_unlock(base->jb_mutex); return PJ_EPENDING; }
-    pj_get_timestamp(&now);
-    if (v->initialized) v->elapsed_ms = 1000.0*(double)(now.u64-v->first_arrival.u64)/(double)v->frequency.u64;
+    if (pj_get_timestamp(&now) != PJ_SUCCESS || pj_get_timestamp_freq(&frequency) != PJ_SUCCESS ||
+        frequency.u64 != v->frequency.u64 || now.u64 < v->last_arrival.u64) v->valid = 0;
+    else if (v->initialized) v->elapsed_ms = 1000.0*(double)(now.u64-v->first_arrival.u64)/(double)v->frequency.u64;
 #define VP_OUT(...) do { if (!vp_append(buffer,capacity,&used,__VA_ARGS__)) { pj_mutex_unlock(base->jb_mutex); return PJ_ETOOSMALL; } } while (0)
     VP_OUT("{\"distribution_protocol\":2,\"interval_loss_runs\":%llu,\"interval_starts_lost\":%s,\"interval_ends_lost\":%s,\"protocol\":1,\"valid\":%s,\"ssrc\":\"%u\",\"elapsed_ms\":%.6f,\"samples\":%llu,\"min_ms\":%.6f,\"max_ms\":%.6f,\"sum_ms\":%.6f,\"jitter_sum_ms\":%.6f,\"resolution_ms\":0.25,\"received\":%llu,\"lost\":%llu,\"loss_runs\":%llu,\"total_received\":%llu,\"total_lost\":%llu,\"total_loss_runs\":%llu,\"duplicates\":%llu,\"reordered\":%llu,\"excluded\":%llu,\"overflow\":%llu,\"packetization_ms\":%.6f,\"frame_ms\":%.6f,\"plc_enabled\":%s,\"bins\":[",
       (unsigned long long)v->delta_local_runs, v->delta_starts_lost ? "true":"false", v->previous_lost ? "true":"false",
@@ -145,7 +153,8 @@ PJ_DEF(pj_status_t) pjmedia_stream_voiceprobe(pjmedia_stream *stream, char *buff
       (unsigned long long)v->duplicates,(unsigned long long)v->reordered,(unsigned long long)v->excluded,(unsigned long long)v->overflow,
       v->variable_packet_ms ? 0.0 : v->packet_ms, (double)stream->dec_ptime/stream->dec_ptime_denum,stream->codec_param.setting.plc?"true":"false");
     for (i=0;i<VP_BINS;++i) if (v->bins[i]) { VP_OUT("%s[%d,%u]",comma?",":"",(int)i-VP_ORIGIN,v->bins[i]);comma=1; }
-    VP_OUT("]}");
+    VP_OUT("],\"pjsip_jitter\":{\"method\":\"vp-rtcp-safe-v1\",\"rx_invalid_flags\":%u,\"tx_invalid_flags\":%u,\"samples\":%d}}",
+        base->rtcp.voiceprobe_jitter_invalid, base->rtcp.voiceprobe_tx_jitter_invalid, base->rtcp.stat.rx.jitter.n);
     pj_bzero(v->bins,sizeof(v->bins));v->samples=0;v->sum=0;v->jitter_sum=0;
     v->delta_received=v->delta_lost=v->delta_runs=v->delta_local_runs=0; v->delta_started=v->delta_starts_lost=0;
     pj_mutex_unlock(base->jb_mutex);

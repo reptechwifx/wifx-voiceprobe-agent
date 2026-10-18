@@ -14,7 +14,7 @@ from maintenance import Maintenance
 from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
-from rtp_quality import ReceiverQuality
+from rtp_quality import ReceiverQuality, annotate_pjsip_jitter
 
 ADMIN_FIELDS = (
     "organization",
@@ -205,6 +205,7 @@ class ProbeCall(pj.Call):
         if self.receiver_quality.latest:
             self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
 
+        annotate_pjsip_jitter(self.stats)
         tx=self.stats.get("tx")
         if tx:
             feedback=tx.get("jitter_ms_mean") is not None or self.stats.get("rtt_ms_mean") is not None
@@ -268,6 +269,7 @@ class ProbeCall(pj.Call):
             return False
         if time.monotonic() - self.closing_at < 0.3:
             return False
+        annotate_pjsip_jitter(self.stats)
         elapsed = max(
             0, (self.ended or time.monotonic()) - (self.started or time.monotonic())
         )

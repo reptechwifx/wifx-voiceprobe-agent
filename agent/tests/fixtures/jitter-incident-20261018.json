@@ -1,0 +1,1430 @@
+{
+  "provenance": "Selected fields transcribed from operator export supplied 2026-10-18; not the complete original JSON. SIP identities, addresses, audio timeline and interval p95 omitted. No packet capture or system uptime supplied.",
+  "metrics": {
+    "established": true,
+    "duration_s": 60.007,
+    "rtp": {
+      "rx": {
+        "packets": 2999,
+        "bytes": 479840,
+        "loss": 0,
+        "duplicates": 0,
+        "reordered": 0,
+        "discarded": 0,
+        "jitter_ms_mean": 6134.609,
+        "jitter_ms_max": 519013,
+        "timing": {
+          "method": "rtp-arrival-v1",
+          "clock_stable": true,
+          "ssrc": "1821832785",
+          "representation": "transit-histogram-v1",
+          "histogram": {
+            "resolution_ms": 0.25,
+            "count": 3001,
+            "min_ms": -2.624231,
+            "max_ms": 27.9578,
+            "sum_ms": 2359.4451280000003,
+            "bins": [
+              [
+                -11,
+                3
+              ],
+              [
+                -10,
+                19
+              ],
+              [
+                -9,
+                58
+              ],
+              [
+                -8,
+                101
+              ],
+              [
+                -7,
+                100
+              ],
+              [
+                -6,
+                102
+              ],
+              [
+                -5,
+                120
+              ],
+              [
+                -4,
+                130
+              ],
+              [
+                -3,
+                60
+              ],
+              [
+                -2,
+                69
+              ],
+              [
+                -1,
+                60
+              ],
+              [
+                0,
+                70
+              ],
+              [
+                1,
+                59
+              ],
+              [
+                2,
+                121
+              ],
+              [
+                3,
+                241
+              ],
+              [
+                4,
+                393
+              ],
+              [
+                5,
+                325
+              ],
+              [
+                6,
+                380
+              ],
+              [
+                7,
+                207
+              ],
+              [
+                8,
+                224
+              ],
+              [
+                9,
+                70
+              ],
+              [
+                10,
+                37
+              ],
+              [
+                11,
+                14
+              ],
+              [
+                12,
+                5
+              ],
+              [
+                13,
+                5
+              ],
+              [
+                14,
+                1
+              ],
+              [
+                16,
+                2
+              ],
+              [
+                17,
+                3
+              ],
+              [
+                18,
+                6
+              ],
+              [
+                19,
+                1
+              ],
+              [
+                20,
+                2
+              ],
+              [
+                21,
+                3
+              ],
+              [
+                22,
+                1
+              ],
+              [
+                25,
+                1
+              ],
+              [
+                32,
+                1
+              ],
+              [
+                36,
+                1
+              ],
+              [
+                67,
+                1
+              ],
+              [
+                70,
+                1
+              ],
+              [
+                71,
+                1
+              ],
+              [
+                73,
+                1
+              ],
+              [
+                79,
+                1
+              ],
+              [
+                111,
+                1
+              ]
+            ]
+          },
+          "duplicates": 0,
+          "reordered": 0,
+          "excluded": 0,
+          "out_of_range": 0,
+          "observed_s": 60.003
+        },
+        "playout": {
+          "valid": true,
+          "format_stable": true,
+          "observed_codecs": [
+            "PCMA/8000"
+          ],
+          "profile": "pjsip-wsola",
+          "packetization_ms": 20,
+          "frame_ms": 10,
+          "distribution_protocol": 2,
+          "unit": "decoder-frame",
+          "source": "pjmedia-jbuf-output-v1",
+          "received": 5974,
+          "lost": 24,
+          "loss_runs": 21,
+          "burst_ratio": 1.1382841899680844
+        },
+        "intervals": [
+          {
+            "offset_s": 0,
+            "duration_s": 0.028,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 2,
+                "min_ms": -1.287191,
+                "max_ms": 0,
+                "sum_ms": -1.287191
+              }
+            },
+            "jitter_ms_mean": 0.0402245,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 2,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 0.028,
+            "duration_s": 2.038,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.107946,
+                "max_ms": 2.280906,
+                "sum_ms": 46.744554
+              }
+            },
+            "jitter_ms_mean": 0.7693823529411765,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 2.066,
+            "duration_s": 2.031,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -2.057144,
+                "max_ms": 3.252578,
+                "sum_ms": 97.262292
+              }
+            },
+            "jitter_ms_mean": 0.7418539900990099,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 4.096,
+            "duration_s": 2.037,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -1.881965,
+                "max_ms": 2.461866,
+                "sum_ms": 98.4869
+              }
+            },
+            "jitter_ms_mean": 0.5981102254901961,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 6.134,
+            "duration_s": 2.04,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -1.542309,
+                "max_ms": 2.439487,
+                "sum_ms": 121.614421
+              }
+            },
+            "jitter_ms_mean": 0.5275729117647059,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 8.174,
+            "duration_s": 2.033,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.05145,
+                "max_ms": 2.183183,
+                "sum_ms": 42.151679
+              }
+            },
+            "jitter_ms_mean": 0.6544364019607842,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 10.207,
+            "duration_s": 2.052,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.103308,
+                "max_ms": 2.954425,
+                "sum_ms": 30.606067
+              }
+            },
+            "jitter_ms_mean": 0.8463168725490195,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 12.258,
+            "duration_s": 2.028,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.624231,
+                "max_ms": 3.728769,
+                "sum_ms": 7.522633
+              }
+            },
+            "jitter_ms_mean": 1.1352409607843137,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 2,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 14.287,
+            "duration_s": 2.033,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -2.228917,
+                "max_ms": 17.50053,
+                "sum_ms": 97.750615
+              }
+            },
+            "jitter_ms_mean": 0.9765128217821782,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 200,
+              "lost": 2,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 16.32,
+            "duration_s": 2.041,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 103,
+                "min_ms": -2.496306,
+                "max_ms": 19.780825,
+                "sum_ms": -135.24968
+              }
+            },
+            "jitter_ms_mean": 0.9742990873786408,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 18.361,
+            "duration_s": 2.035,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -2.531003,
+                "max_ms": 2.77135,
+                "sum_ms": -19.816343
+              }
+            },
+            "jitter_ms_mean": 0.7154354158415842,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 20.396,
+            "duration_s": 2.045,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 103,
+                "min_ms": -2.068791,
+                "max_ms": 4.596872,
+                "sum_ms": 36.999179
+              }
+            },
+            "jitter_ms_mean": 0.9610551359223302,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 2,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 22.441,
+            "duration_s": 2.038,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -1.536959,
+                "max_ms": 17.852681,
+                "sum_ms": 137.097913
+              }
+            },
+            "jitter_ms_mean": 0.8443805148514851,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 24.479,
+            "duration_s": 2.028,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -1.992999,
+                "max_ms": 16.912345,
+                "sum_ms": 60.073218
+              }
+            },
+            "jitter_ms_mean": 0.9988035784313726,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 26.507,
+            "duration_s": 2.034,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -1.061584,
+                "max_ms": 9.126809,
+                "sum_ms": 136.332409
+              }
+            },
+            "jitter_ms_mean": 0.7348382970297029,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 28.541,
+            "duration_s": 2.044,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 103,
+                "min_ms": -2.25539,
+                "max_ms": 4.598945,
+                "sum_ms": 46.213147
+              }
+            },
+            "jitter_ms_mean": 0.7083850485436893,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 205,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 30.584,
+            "duration_s": 2.042,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.507059,
+                "max_ms": 5.261808,
+                "sum_ms": 94.24169
+              }
+            },
+            "jitter_ms_mean": 0.7755122352941177,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 2,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 32.627,
+            "duration_s": 2.035,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -1.767167,
+                "max_ms": 4.615095,
+                "sum_ms": 99.754487
+              }
+            },
+            "jitter_ms_mean": 0.751130495049505,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 200,
+              "lost": 2,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 34.661,
+            "duration_s": 2.033,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.307695,
+                "max_ms": 4.442838,
+                "sum_ms": 53.795138
+              }
+            },
+            "jitter_ms_mean": 0.6959085784313725,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 36.694,
+            "duration_s": 2.091,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 105,
+                "min_ms": -2.060119,
+                "max_ms": 27.9578,
+                "sum_ms": 139.48188
+              }
+            },
+            "jitter_ms_mean": 1.1096052285714286,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 206,
+              "lost": 4,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 38.785,
+            "duration_s": 2.043,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.021334,
+                "max_ms": 5.394372,
+                "sum_ms": 113.365177
+              }
+            },
+            "jitter_ms_mean": 0.5672506176470589,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 40.828,
+            "duration_s": 2.042,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.186455,
+                "max_ms": 18.37487,
+                "sum_ms": 131.49648
+              }
+            },
+            "jitter_ms_mean": 1.012920294117647,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 42.871,
+            "duration_s": 2.034,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.018826,
+                "max_ms": 4.833634,
+                "sum_ms": 100.875139
+              }
+            },
+            "jitter_ms_mean": 0.658379705882353,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 2,
+              "loss_runs": 2,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 44.904,
+            "duration_s": 2.035,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -1.548359,
+                "max_ms": 5.204278,
+                "sum_ms": 169.441191
+              }
+            },
+            "jitter_ms_mean": 0.6126755742574257,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 46.939,
+            "duration_s": 2.037,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -0.752881,
+                "max_ms": 2.952834,
+                "sum_ms": 212.191896
+              }
+            },
+            "jitter_ms_mean": 0.4924875,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 48.976,
+            "duration_s": 2.028,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -1.813442,
+                "max_ms": 6.453571,
+                "sum_ms": 124.903433
+              }
+            },
+            "jitter_ms_mean": 0.7902227156862744,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 51.004,
+            "duration_s": 2.034,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -2.275295,
+                "max_ms": 4.174634,
+                "sum_ms": 4.15721
+              }
+            },
+            "jitter_ms_mean": 0.7545997326732673,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 202,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 53.038,
+            "duration_s": 2.041,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 103,
+                "min_ms": -2.275547,
+                "max_ms": 3.261446,
+                "sum_ms": 62.99697
+              }
+            },
+            "jitter_ms_mean": 0.7727343689320388,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 55.079,
+            "duration_s": 2.032,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 101,
+                "min_ms": -2.046047,
+                "max_ms": 3.150618,
+                "sum_ms": -0.298393
+              }
+            },
+            "jitter_ms_mean": 1.0203645346534653,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 204,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 57.11,
+            "duration_s": 2.033,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 102,
+                "min_ms": -2.272013,
+                "max_ms": 5.031884,
+                "sum_ms": 167.926094
+              }
+            },
+            "jitter_ms_mean": 0.8050553823529413,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 203,
+              "lost": 1,
+              "loss_runs": 1,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 59.144,
+            "duration_s": 0.859,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 43,
+                "min_ms": -0.903121,
+                "max_ms": 5.348237,
+                "sum_ms": 82.614923
+              }
+            },
+            "jitter_ms_mean": 0.7700394883720929,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 84,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          },
+          {
+            "offset_s": 60.003,
+            "duration_s": 0,
+            "timing": {
+              "method": "rtp-arrival-v1",
+              "clock_stable": true,
+              "ssrc": "1821832785",
+              "representation": "transit-summary-v1",
+              "reference_min_ms": -2.624231,
+              "resolution_ms": 0.25,
+              "summary": {
+                "count": 0,
+                "min_ms": null,
+                "max_ms": null,
+                "sum_ms": 0
+              }
+            },
+            "jitter_ms_mean": null,
+            "playout": {
+              "valid": true,
+              "format_stable": true,
+              "observed_codecs": [
+                "PCMA/8000"
+              ],
+              "profile": "pjsip-wsola",
+              "packetization_ms": 20,
+              "frame_ms": 10,
+              "distribution_protocol": 2,
+              "unit": "decoder-frame",
+              "source": "pjmedia-jbuf-output-v1",
+              "received": 0,
+              "lost": 0,
+              "loss_runs": 0,
+              "starts_lost": false,
+              "ends_lost": false
+            }
+          }
+        ]
+      },
+      "codec": "PCMA/8000",
+      "audio_clock_hz": 8000,
+      "rtp_clock_hz": 8000
+    },
+    "audio": {
+      "analyzed_s": 59.5,
+      "rms_dbfs": -14.95,
+      "reference_level_dbfs": -15,
+      "level_error_db": 0.05,
+      "level_dbfs_min": -18.35,
+      "level_dbfs_max": -14.94,
+      "level_dbfs_std": 0.093,
+      "level_anomaly_s": 0,
+      "tone_ratio_mean": 0.9996,
+      "interrupted_s": 0
+    }
+  },
+  "expected": {
+    "mos": 4.379,
+    "minimum_mos": 4.237,
+    "p05_mos": 4.328
+  }
+}

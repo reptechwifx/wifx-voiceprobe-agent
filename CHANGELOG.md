@@ -1,3 +1,7 @@
+## Agent Bêta 0.9-017 — installateurs 1.0.2
+
+Correction arithmétique exacte du calcul de jitter dans PJSIP 2.16, vérifiée après longue durée de fonctionnement, sur PCMA, PCMU et G.722. Runtimes natifs Debian 12/Ubuntu 24.04 AMD64 et image Docker AMD64 reconstruits. Distribution et mises à jour par le gestionnaire officiel, avec manifestes signés et sources correspondantes. Compatibilité Synology Intel/AMD64 via Docker qualifiée sur profil logiciel, sans essai sur NAS physique. Windows reste réservé au LAB, sans EXE client Authenticode. Voir [la qualification 0.9-017](docs/qualification-0.9-017.md).
+
 # Historique
 
 ## Windows portable 0.2.0-LAB — en cours de qualification

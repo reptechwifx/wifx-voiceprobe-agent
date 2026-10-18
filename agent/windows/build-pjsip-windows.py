@@ -81,15 +81,29 @@ def main():
     subprocess.run(['python3', str(project/'scripts/instrument-pjsip.py'), str(args.work/'pjproject-2.16'), str(project/'agent/installer/rtp-observer.h')], check=True)
     with (args.work / "build-private.log").open("wb") as log:
         subprocess.run(DOCKER + ["build", "--pull=false", "-t", BUILDER, "-f", str(tool / "Dockerfile.pjsip-cross"), str(tool)], check=True, stdout=log, stderr=subprocess.STDOUT)
-        command = DOCKER + ["run", "--rm", "--pull=never"]
+        campaign = os.environ.get('VP_STORAGE_CAMPAIGN')
+        if not campaign:
+            raise ValueError('Campagne de stockage obligatoire pour le compilateur jetable.')
+        labels = {'net.wifx.project':'voiceprobe', 'net.wifx.storage.workspace':str(project),
+                  'net.wifx.storage.campaign':campaign, 'net.wifx.storage.disposable':'true'}
+        command = DOCKER + ["create", "--pull=never", "--network=none", "--user", str(os.getuid())+':'+str(os.getgid())]
+        for key, value in labels.items():
+            command += ['--label', key+'='+value]
         for source, target, readonly in ((args.work.resolve(), "/build", False), (sdk, "/python", True), (tool / "build-pjsip-cross.sh", "/build-pjsip-cross.sh", True), (args.output.resolve(), "/output", False)):
             command += ["--mount", "type=bind,src=" + str(source) + ",dst=" + target + (",readonly" if readonly else "")]
         command += ["-e", "VOICEPROBE_CONTROLLED_BUILD=marc-home", "-e", "VOICEPROBE_BUILD_UID=" + str(os.getuid()), "-e", "VOICEPROBE_BUILD_GID=" + str(os.getgid()), BUILDER, "bash", "/build-pjsip-cross.sh"]
-        subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)
+        cid = subprocess.check_output(command, text=True).strip()
+        try:
+            subprocess.run(['python3', str(project/'scripts/cleanup-voiceprobe.py'), 'register', '--', 'container', cid], check=True)
+            subprocess.run(DOCKER+['start','-a',cid], check=True, stdout=log, stderr=subprocess.STDOUT)
+            if json.loads(subprocess.check_output(DOCKER+['inspect',cid]))[0]['State']['ExitCode'] != 0:
+                raise ValueError('Compilation Windows échouée.')
+        finally:
+            subprocess.run(DOCKER+['rm','-f',cid], check=True, stdout=subprocess.DEVNULL)
     # Container-created files belong to root; read-only publication tools can consume them.
     dependencies = validate_dependencies((args.output / "pe-headers.txt").read_text())
     runtime_dependencies = validate_dependencies((args.output / "winpthread-pe-headers.txt").read_text(), runtime=True)
-    metadata = {"pjsip": "2.16", "python_abi": "cp313", "architecture": "AMD64", "cpu_baseline": "x86-64 generic", "source_sha256": SOURCE_SHA256, "codecs_required": ["G722", "PCMA", "PCMU"], "calls": 128, "accounts": 32, "sound": "null device", "sip_tls": False, "dependencies": dependencies, "runtime_dependencies": runtime_dependencies, "python_runtime_sha256": hashlib.sha256((sdk / "python313.dll").read_bytes()).hexdigest(), "builder_image": json.loads(subprocess.check_output(DOCKER + ["image", "inspect", BUILDER]))[0]["Id"], "windows_qualified": False, "rtp_observer_protocol": 1, "observer_sha256": hashlib.sha256((project/"agent/installer/rtp-observer.h").read_bytes()).hexdigest()}
+    metadata = {"pjsip": "2.16", "python_abi": "cp313", "architecture": "AMD64", "cpu_baseline": "x86-64 generic", "source_sha256": SOURCE_SHA256, "codecs_required": ["G722", "PCMA", "PCMU"], "calls": 128, "accounts": 32, "sound": "null device", "sip_tls": False, "dependencies": dependencies, "runtime_dependencies": runtime_dependencies, "python_runtime_sha256": hashlib.sha256((sdk / "python313.dll").read_bytes()).hexdigest(), "builder_image": json.loads(subprocess.check_output(DOCKER + ["image", "inspect", BUILDER]))[0]["Id"], "windows_qualified": False, "rtcp_patch_sha256": hashlib.sha256((project/"scripts/instrument-pjsip.py").read_bytes()).hexdigest(), "rtcp_arithmetic": "vp-rtcp-safe-v1", "rtcp_arithmetic_sha256": hashlib.sha256((project/"agent/installer/rtcp-safe.h").read_bytes()).hexdigest(), "rtp_playout_distribution_protocol": 2, "rtp_observer_protocol": 1, "observer_sha256": hashlib.sha256((project/"agent/installer/rtp-observer.h").read_bytes()).hexdigest()}
     (args.output / "binary.json").write_text(json.dumps(metadata, indent=2) + "\n")
     checksums = "".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in sorted(args.output.iterdir()) if path.is_file() and path.name != "SHA256SUMS")
     (args.output / "SHA256SUMS").write_text(checksums)

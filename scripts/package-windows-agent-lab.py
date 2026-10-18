@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Paquet Windows LAB signé, liste fermée ; aucune publication ni clé dans le ZIP."""
+if __name__ == '__main__':
+    from storage_maintenance import guard
+    guard(4)
+
 # SPDX-License-Identifier: GPL-3.0-or-later
 import argparse
 import hashlib

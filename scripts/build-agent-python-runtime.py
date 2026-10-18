@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Assemble un SDK PJSUA2 déjà construit et des wheels exclusivement binaires sur Marc-Home."""
+if __name__ == '__main__':
+    from storage_maintenance import guard
+    guard(3)
+
 import argparse
 import gzip
 import hashlib

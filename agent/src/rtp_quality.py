@@ -17,6 +17,32 @@ def percentile(histogram, count, resolution):
     return None
 
 
+def annotate_pjsip_jitter(stats):
+    """Keep original global statistics and expose failures without saturation."""
+    provenance = stats.get('rx', {}).get('pjsip_jitter', {})
+    if provenance.get('method') != 'vp-rtcp-safe-v1':
+        return
+    for direction in ('rx', 'tx'):
+        stream = stats.get(direction)
+        if not isinstance(stream, dict):
+            continue
+        flags = provenance.get(direction + '_invalid_flags')
+        if type(flags) is not int or flags < 0:
+            flags = 1
+        previous = stream.get('jitter_calculation', {})
+        raw_mean = stream.get('jitter_ms_mean')
+        raw_max = stream.get('jitter_ms_max')
+        if flags and raw_mean is None and previous.get('method') == provenance['method']:
+            raw_mean, raw_max = previous.get('raw_mean_ms'), previous.get('raw_max_ms')
+        stream['jitter_calculation'] = {
+            'method': provenance['method'], 'valid': flags == 0, 'invalid_flags': flags,
+            'raw_mean_ms': raw_mean, 'raw_max_ms': raw_max,
+            'reason': 'Clock discontinuity or statistic outside its numeric domain' if flags else None,
+        }
+        if flags:
+            stream['jitter_ms_mean'] = stream['jitter_ms_max'] = None
+
+
 class ReceiverQuality:
     def __init__(self):
         self.histogram = {}
@@ -116,6 +142,8 @@ class ReceiverQuality:
             'duplicates': self.last['duplicates'], 'reordered': self.last['reordered'], 'excluded': self.last['excluded'],
             'out_of_range': self.last['overflow'], 'observed_s': round(self.end_ms / 1000, 3)},
             'playout': self.playout(codec, self.last['total_received'], self.last['total_lost'], self.last['total_loss_runs']), 'intervals': []}
+        if self.last.get('pjsip_jitter', {}).get('method') == 'vp-rtcp-safe-v1':
+            result['pjsip_jitter'] = dict(self.last['pjsip_jitter'])
         for interval in self.intervals:
             summary = {key: interval[key] for key in ['count', 'min_ms', 'max_ms', 'sum_ms', 'p95_transit_ms']}
             result['intervals'].append({'offset_s': interval['offset_s'], 'duration_s': interval['duration_s'],
