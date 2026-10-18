@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from audio import analyze, reference
-from dtmf_identity import FrameReceiver, checksum, decode, frame
+from dtmf_identity import DISCOVERY_REPLY, DISCOVERY_REQUEST, FrameReceiver, checksum, decode, frame
 
 
 class DtmfIdentity019Test(unittest.TestCase):
@@ -38,6 +38,23 @@ class DtmfIdentity019Test(unittest.TestCase):
         clock[0] += 10.1
         for digit in incoming:
             self.assertIsNone(late.feed(digit))
+
+    def test_short_discovery_does_not_consume_the_full_identification_frame(self):
+        clock = [0.0]
+        receiver = FrameReceiver(clock=lambda: clock[0], expected_kind="1")
+        receiver.start()
+        for control in (DISCOVERY_REQUEST, DISCOVERY_REPLY):
+            result = None
+            for digit in control:
+                result = receiver.feed(digit)
+                clock[0] += 0.16
+            self.assertEqual(result, ("discovery", control))
+            self.assertIsNone(receiver.result)
+        result = None
+        for digit in frame("1", "1234567890"):
+            result = receiver.feed(digit)
+            clock[0] += 0.16
+        self.assertEqual(result, ("1", "1234567890"))
 
     def test_audio_reference_starts_after_identification_window(self):
         with tempfile.TemporaryDirectory() as directory:

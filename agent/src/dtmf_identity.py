@@ -12,6 +12,8 @@ TOKEN_DIGITS = 10
 FRAME_LENGTH = 15
 IDENTIFICATION_SECONDS = 10.0
 DTMF_DURATION_MS = 160
+DISCOVERY_REQUEST = "*90#"
+DISCOVERY_REPLY = "*91#"
 FRAME_PATTERN = re.compile(r"\*[12][0-9]{12}#\Z")
 
 
@@ -68,6 +70,10 @@ class FrameReceiver:
             self.invalid += 1
             self.buffer = ""
         elif digit == "#" and self.buffer:
+            if self.buffer in (DISCOVERY_REQUEST, DISCOVERY_REPLY):
+                control = self.buffer
+                self.buffer = ""
+                return ("discovery", control)
             candidate = decode(self.buffer)
             self.buffer = ""
             if candidate and (self.expected_kind is None or candidate[0] == self.expected_kind):

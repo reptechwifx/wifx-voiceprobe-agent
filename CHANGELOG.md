@@ -1,3 +1,7 @@
+## Agent Bêta 0.9-020 — hotfix DTMF automatique
+
+Tout appel d'au moins dix secondes émis par un Agent 0.9-020 tente le DTMF. Une courte séquence de découverte précède l'identification complète entre Agents ; sans réponse, seule l'émission locale est observée. Le type de scénario et l'organisation ne bloquent plus la tentative. Les binaires PJSIP/PJSUA2 corrigés de 0.9-017 et le gestionnaire officiel restent inchangés. Voir [la qualification 0.9-020](docs/qualification-0.9-020.md).
+
 ## Agent Bêta 0.9-019 — installateurs 1.0.2
 
 Identification bidirectionnelle des Agents compatibles par RTP telephone-event pendant les dix premières secondes de l'appel. Les observations DTMF sont confirmées par le Controller et permettent d'associer deux rapports RTP malgré des Call-ID SIP distincts. Les mesures audio de référence utilisent la phase après identification ; les compteurs bruts restent consultables. Le runtime PJSIP/PJSUA2 corrigé de 0.9-017 et le gestionnaire de mise à jour officiel sont conservés. Les Agents 0.9-017 restent compatibles avec le Controller 0.9-019 pendant la montée de version. Aucun EXE Windows client n'est publié. Voir [la qualification 0.9-019](docs/qualification-0.9-019.md).
