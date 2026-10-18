@@ -12,9 +12,16 @@ TOKEN_DIGITS = 10
 FRAME_LENGTH = 15
 IDENTIFICATION_SECONDS = 10.0
 DTMF_DURATION_MS = 160
+NUMERIC_DTMF_DURATION_MS = 120
 DISCOVERY_REQUEST = "*90#"
 DISCOVERY_REPLY = "*91#"
 FRAME_PATTERN = re.compile(r"\*[12][0-9]{12}#\Z")
+NUMERIC_DISCOVERY_REQUEST = "70483"
+NUMERIC_DISCOVERY_REPLY = "83047"
+NUMERIC_FRAME_LENGTH = 14
+NUMERIC_FRAME_PATTERN = re.compile(r"6[12][0-9]{12}\Z")
+MAX_DISCOVERY_ATTEMPTS = 3
+DISCOVERY_RETRY_SECONDS = 1.4
 
 
 def checksum(body):
@@ -36,6 +43,68 @@ def decode(value):
         return None
     body = value[1:12]
     return (body[0], body[1:]) if value[12:14] == checksum(body) else None
+
+
+def numeric_frame(kind, token):
+    if kind not in ("1", "2") or not re.fullmatch(r"[0-9]{10}", token):
+        raise ValueError("Invalid numeric DTMF frame")
+    body = "6" + kind + token
+    return body + checksum(body)
+
+
+def decode_numeric(value):
+    if not isinstance(value, str) or not NUMERIC_FRAME_PATTERN.fullmatch(value):
+        return None
+    body = value[:12]
+    return (body[1], body[2:]) if value[12:] == checksum(body) else None
+
+
+class NumericFrameReceiver:
+    """Sliding decoder for delimiter-free v2 messages on one call."""
+
+    def __init__(self, clock=time.monotonic, expected_kind=None):
+        self.clock = clock
+        self.expected_kind = expected_kind
+        self.started = None
+        self.buffer = ""
+        self.last_digit_at = None
+        self.result = None
+        self.invalid = 0
+        self.digits_seen = 0
+        self.discovery_received = False
+
+    def start(self):
+        self.started = self.clock()
+
+    def feed(self, digit):
+        now = self.clock()
+        if self.started is None or now - self.started > IDENTIFICATION_SECONDS or self.result:
+            return None
+        if not isinstance(digit, str) or len(digit) != 1 or digit not in "0123456789":
+            return None
+        self.digits_seen += 1
+        if self.last_digit_at is not None and now - self.last_digit_at > 1.0:
+            self.buffer = ""
+        self.last_digit_at = now
+        self.buffer = (self.buffer + digit)[-NUMERIC_FRAME_LENGTH:]
+        if not self.discovery_received:
+            for control in (NUMERIC_DISCOVERY_REQUEST, NUMERIC_DISCOVERY_REPLY):
+                if self.buffer.endswith(control):
+                    self.discovery_received = True
+                    self.buffer = ""
+                    return ("discovery", control)
+            return None
+        if (self.expected_kind == "1" and self.buffer.endswith(NUMERIC_DISCOVERY_REQUEST)
+                and not self.buffer.startswith("61")):
+            self.buffer = ""
+            return ("discovery", NUMERIC_DISCOVERY_REQUEST)
+        if len(self.buffer) == NUMERIC_FRAME_LENGTH:
+            candidate = decode_numeric(self.buffer)
+            if candidate and (self.expected_kind is None or candidate[0] == self.expected_kind):
+                self.result = candidate
+                return candidate
+            self.invalid += 1
+        return None
 
 
 class FrameReceiver:

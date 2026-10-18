@@ -1,7 +1,7 @@
 {
-  "agent_version": "0.9-020",
+  "agent_version": "0.9-021",
   "installer_version": "1.0.2",
-  "release_source_revision": "84df95fd4037860983e1d046895f5e916ed0d66f",
+  "release_source_revision": "97a012229c7aed0ba090646ce9097d25ecbb8b91",
   "rtp_observer_protocol": 1,
   "distribution_protocol": 2,
   "observer_sha256": "06cbd979f439550d2ef05f0407194e49143aae72610c1cf3cd255023923c14cf",
@@ -10,8 +10,8 @@
     "debian-12-amd64-cp311": "e16e5c4b5f1f7048e632c9ac4b03fd8e5bbd08b7f717aecf5a27f7b0dfb544f9"
   },
   "quality_scope": "Receiver-erasure telemetry only; MOS G711 reference model is calculated by Controller013, not an actual WSOLA calibration. G722 MOS unqualified.",
-  "publication_status": "signed-hotfix-release",
-  "qualification": "docs/qualification-0.9-020.md",
+  "publication_status": "signed-beta-release",
+  "qualification": "docs/qualification-0.9-021.md",
   "new_windows_binary": false,
   "rtcp_arithmetic": "vp-rtcp-safe-v1",
   "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c",

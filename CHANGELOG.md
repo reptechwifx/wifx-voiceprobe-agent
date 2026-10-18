@@ -1,3 +1,7 @@
+## Agent Bêta 0.9-021 — DTMF numérique
+
+Préambule `70483` répété au plus trois fois, réponse `83047`, puis identifiant et confirmation numériques liés à l’exécution. Le protocole évite `*` et `#`, préserve les rapports RTP indépendants et démarre la mesure audio dès la confirmation. Les binaires PJSIP 2.16 et le gestionnaire officiel sont réutilisés. Voir [la qualification 0.9-021](docs/qualification-0.9-021.md).
+
 ## Agent Bêta 0.9-020 — hotfix DTMF automatique
 
 Tout appel d'au moins dix secondes émis par un Agent 0.9-020 tente le DTMF. Une courte séquence de découverte précède l'identification complète entre Agents ; sans réponse, seule l'émission locale est observée. Le type de scénario et l'organisation ne bloquent plus la tentative. Les binaires PJSIP/PJSUA2 corrigés de 0.9-017 et le gestionnaire officiel restent inchangés. Voir [la qualification 0.9-020](docs/qualification-0.9-020.md).

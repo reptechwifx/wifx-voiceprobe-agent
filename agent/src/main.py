@@ -15,7 +15,11 @@ from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
 from rtp_quality import ReceiverQuality, annotate_pjsip_jitter
-from dtmf_identity import FrameReceiver, IDENTIFICATION_SECONDS, DTMF_DURATION_MS, DISCOVERY_REQUEST, DISCOVERY_REPLY, decode as decode_dtmf, frame as dtmf_frame
+from dtmf_identity import (FrameReceiver, NumericFrameReceiver, IDENTIFICATION_SECONDS, DTMF_DURATION_MS,
+    NUMERIC_DTMF_DURATION_MS,
+    DISCOVERY_REQUEST, DISCOVERY_REPLY, NUMERIC_DISCOVERY_REQUEST, NUMERIC_DISCOVERY_REPLY,
+    MAX_DISCOVERY_ATTEMPTS, DISCOVERY_RETRY_SECONDS, decode as decode_dtmf,
+    decode_numeric, frame as dtmf_frame, numeric_frame)
 
 ADMIN_FIELDS = (
     "organization",
@@ -81,7 +85,15 @@ class ProbeCall(pj.Call):
         self.dtmf_discovery_received = False
         self.dtmf_discovery_reply_pending = False
         self.dtmf_discovery_reply_sent = False
+        self.dtmf_discovery_reply_attempts = 0
+        self.dtmf_discovery_received_count = 0
+        self.dtmf_next_reply_at = 0.0
         self.dtmf_receiver = FrameReceiver()
+        self.dtmf_numeric_receiver = NumericFrameReceiver()
+        self.dtmf_protocol = None
+        self.dtmf_started_at = None
+        self.dtmf_discovery_attempts = 0
+        self.dtmf_next_discovery_at = 0.0
         self.dtmf_event_ids = set()
         self.dtmf_sent = False
         self.dtmf_ack_sent = False
@@ -94,6 +106,8 @@ class ProbeCall(pj.Call):
         self.is_incoming = False
         self.dtmf_expected = False
         self.audio_phase_started = False
+        self.rtp_audio_baseline = None
+        self.audio_phase_offset_s = None
 
     def onCallState(self, prm):
         info = self.getInfo()
@@ -103,6 +117,7 @@ class ProbeCall(pj.Call):
             self.started = self.started or time.monotonic()
             if self.dtmf_receiver.started is None:
                 self.dtmf_receiver.start()
+                self.dtmf_numeric_receiver.start()
             self.established = True
             self.events.append({"kind": "confirmed", "at": utc()})
             self.agent.journal.record(
@@ -132,6 +147,10 @@ class ProbeCall(pj.Call):
             if self.media is not None:
                 return
             self.media = self.getAudioMedia(-1)
+            if self.started and self.dtmf_started_at is None:
+                self.dtmf_started_at = time.monotonic()
+                self.dtmf_receiver.start()
+                self.dtmf_numeric_receiver.start()
             if self.audio_profile == "echo":
                 self.media.startTransmit(self.media)
             else:
@@ -166,35 +185,46 @@ class ProbeCall(pj.Call):
     def _receive_dtmf_digit(self, digit, method):
         if self.is_incoming:
             self.dtmf_expected = True
-        result = self.dtmf_receiver.feed(digit)
+        if self.dtmf_protocol == 2:
+            result = self.dtmf_numeric_receiver.feed(digit)
+        elif self.dtmf_protocol == 1:
+            result = self.dtmf_receiver.feed(digit)
+        else:
+            result = self.dtmf_numeric_receiver.feed(digit) or self.dtmf_receiver.feed(digit)
         if result is None:
             return
         kind, code = result
         if kind == "discovery":
-            if self.is_incoming and code == DISCOVERY_REQUEST:
-                self.dtmf_discovery_reply_pending = True
+            if self.is_incoming and not self.dtmf_received and code in (DISCOVERY_REQUEST, NUMERIC_DISCOVERY_REQUEST):
+                self.dtmf_protocol = 2 if code == NUMERIC_DISCOVERY_REQUEST else 1
+                self.dtmf_discovery_received_count += 1
+                if not self.dtmf_discovery_reply_sent or (self.dtmf_protocol == 2 and self.dtmf_discovery_received_count >= 3):
+                    self.dtmf_discovery_reply_pending = True
                 self.dtmf_status = "discovery_received"
-            elif not self.is_incoming and self.dtmf_discovery and code == DISCOVERY_REPLY:
+            elif not self.is_incoming and self.dtmf_discovery and code in (DISCOVERY_REPLY, NUMERIC_DISCOVERY_REPLY):
                 self.dtmf_discovery_received = True
                 self.dtmf_status = "discovery_confirmed"
             return
+        if self.is_incoming and self.dtmf_protocol is None:
+            self.dtmf_protocol = 1
         if (kind == "1" and self.is_incoming) or (kind == "2" and not self.is_incoming and self.dtmf_frame is not None):
             self.dtmf_received = True
             self.dtmf_received_method = method
             self.dtmf_status = "received_pending_server"
+            encoded = numeric_frame(kind, code) if self.dtmf_protocol == 2 else dtmf_frame(kind, code)
             self.agent.dtmf_observations.put({"local_call_id": self.run_id,
-                "account_id": self.account.config["id"], "frame": dtmf_frame(kind, code),
-                "method": method, "deadline": (self.started or time.monotonic()) + IDENTIFICATION_SECONDS})
+                "account_id": self.account.config["id"], "frame": encoded,
+                "method": method, "deadline": (self.dtmf_started_at or self.started or time.monotonic()) + IDENTIFICATION_SECONDS})
             self.agent.poll_now.set()
 
     def send_dtmf(self, digits):
-        if not self.started or self.finished or time.monotonic() - self.started >= IDENTIFICATION_SECONDS:
+        if not self.started or self.finished or time.monotonic() - (self.dtmf_started_at or self.started) >= IDENTIFICATION_SECONDS:
             self.dtmf_status = "timeout"
             return False
         try:
             parameters = pj.CallSendDtmfParam()
             parameters.method = pj.PJSUA_DTMF_METHOD_RFC2833
-            parameters.duration = DTMF_DURATION_MS
+            parameters.duration = NUMERIC_DTMF_DURATION_MS if self.dtmf_protocol == 2 else DTMF_DURATION_MS
             parameters.digits = digits
             self.sendDtmf(parameters)
             self.dtmf_method = "rtp_telephone_event"
@@ -207,16 +237,33 @@ class ProbeCall(pj.Call):
     def identification_tick(self):
         if not self.started or self.finished:
             return
-        elapsed = time.monotonic() - self.started
-        if self.dtmf_discovery_reply_pending and self.media is not None and not self.dtmf_discovery_reply_sent and elapsed < IDENTIFICATION_SECONDS:
-            self.dtmf_discovery_reply_sent = self.send_dtmf(DISCOVERY_REPLY)
-            if self.dtmf_discovery_reply_sent:
+        if self.media is not None and self.dtmf_started_at is None:
+            self.dtmf_started_at = time.monotonic()
+            if not (self.dtmf_receiver.digits_seen or self.dtmf_numeric_receiver.digits_seen):
+                self.dtmf_receiver.start()
+                self.dtmf_numeric_receiver.start()
+        elapsed = time.monotonic() - (self.dtmf_started_at or self.started)
+        if (self.dtmf_discovery_reply_pending and self.media is not None
+                and self.dtmf_discovery_reply_attempts < (2 if self.dtmf_protocol == 2 else 1)
+                and elapsed >= self.dtmf_next_reply_at and elapsed < IDENTIFICATION_SECONDS):
+            reply = NUMERIC_DISCOVERY_REPLY if self.dtmf_protocol == 2 else DISCOVERY_REPLY
+            if self.send_dtmf(reply):
+                self.dtmf_discovery_reply_sent = True
+                self.dtmf_discovery_reply_attempts += 1
+                self.dtmf_next_reply_at = elapsed + DISCOVERY_RETRY_SECONDS
                 self.dtmf_discovery_reply_pending = False
                 self.dtmf_status = "discovery_reply_sent"
-        if self.dtmf_frame and self.dtmf_discovery and self.media is not None and not self.dtmf_discovery_sent and elapsed < IDENTIFICATION_SECONDS:
-            self.dtmf_discovery_sent = self.send_dtmf(DISCOVERY_REQUEST)
-            if self.dtmf_discovery_sent:
-                self.dtmf_status = "discovery_sent"
+        if (self.dtmf_frame and self.dtmf_discovery and self.media is not None and
+                not self.dtmf_discovery_received and not self.dtmf_sent and elapsed < IDENTIFICATION_SECONDS):
+            repeat = self.dtmf_protocol == 2
+            if (self.dtmf_discovery_attempts < (MAX_DISCOVERY_ATTEMPTS if repeat else 1)
+                    and elapsed >= self.dtmf_next_discovery_at and (not repeat or elapsed <= 3.5)):
+                request = NUMERIC_DISCOVERY_REQUEST if repeat else DISCOVERY_REQUEST
+                if self.send_dtmf(request):
+                    self.dtmf_discovery_sent = True
+                    self.dtmf_discovery_attempts += 1
+                    self.dtmf_next_discovery_at = elapsed + DISCOVERY_RETRY_SECONDS
+                    self.dtmf_status = "discovery_sent"
         if self.dtmf_frame and (not self.dtmf_discovery or self.dtmf_discovery_received) and self.media is not None and not self.dtmf_sent and elapsed < IDENTIFICATION_SECONDS:
             self.dtmf_sent = self.send_dtmf(self.dtmf_frame)
             if self.dtmf_sent:
@@ -228,10 +275,18 @@ class ProbeCall(pj.Call):
         if elapsed >= IDENTIFICATION_SECONDS and self.dtmf_expected and self.dtmf_status == "not_requested":
             self.dtmf_status = ("invalid_frame" if self.dtmf_receiver.invalid else
                                 "incomplete" if self.dtmf_receiver.digits_seen else "not_received")
-        if (self.dtmf_frame or self.dtmf_expected) and not self.audio_phase_started and elapsed >= IDENTIFICATION_SECONDS:
+        audio_boundary = IDENTIFICATION_SECONDS
+        if self.dtmf_protocol == 2 and self.dtmf_controller_confirmed and self.dtmf_completed_at:
+            audio_boundary = min(IDENTIFICATION_SECONDS,
+                                 self.dtmf_completed_at - (self.dtmf_started_at or self.started) + 0.3)
+        if (self.dtmf_frame or self.dtmf_expected) and not self.audio_phase_started and elapsed >= audio_boundary:
             # Drain the native observer at the phase boundary. DTMF can suppress
             # regular audio RTP, so its decoder erasures must remain diagnostic only.
             self.collect_receiver_quality(force=True)
+            rx = self.stats.get("rx", {})
+            if self.dtmf_protocol == 2 and all(isinstance(rx.get(key), int) and rx[key] >= 0 for key in ("packets", "loss")):
+                self.rtp_audio_baseline = {key: rx[key] for key in ("packets", "loss")}
+            self.audio_phase_offset_s = round(elapsed, 3)
             self.receiver_quality.begin_audio_phase()
             self.audio_phase_started = True
 
@@ -318,6 +373,12 @@ class ProbeCall(pj.Call):
             self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
 
         annotate_pjsip_jitter(self.stats)
+        rx = self.stats.get("rx", {})
+        if self.rtp_audio_baseline and all(isinstance(rx.get(key), int) and rx[key] >= self.rtp_audio_baseline[key] for key in ("packets", "loss")):
+            received = rx["packets"] - self.rtp_audio_baseline["packets"]
+            lost = rx["loss"] - self.rtp_audio_baseline["loss"]
+            rx["audio_phase_rtp"] = {"method": "rtcp-receiver-counter-delta-v1", "start_s": self.audio_phase_offset_s,
+                                     "received": received, "lost": lost, "valid": received + lost > 0}
         tx=self.stats.get("tx")
         if tx:
             feedback=tx.get("jitter_ms_mean") is not None or self.stats.get("rtt_ms_mean") is not None
@@ -401,7 +462,7 @@ class ProbeCall(pj.Call):
         audio = None
         try:
             if self.recording.exists():
-                audio_start = IDENTIFICATION_SECONDS if (self.dtmf_frame or self.dtmf_expected) else 0
+                audio_start = (self.audio_phase_offset_s or IDENTIFICATION_SECONDS) if (self.dtmf_frame or self.dtmf_expected) else 0
                 if audio_start and elapsed <= audio_start + 0.5:
                     self.events.append({"kind": "audio_phase_unavailable", "at": utc()})
                 else:
@@ -429,20 +490,23 @@ class ProbeCall(pj.Call):
             "rtp": self.stats,
             "audio": audio,
             "events": self.events,
-            "dtmf": {"protocol": 1, "status": self.dtmf_status,
+            "dtmf": {"protocol": self.dtmf_protocol, "status": self.dtmf_status,
                      "discovery_sent": self.dtmf_discovery_sent if self.dtmf_frame else None,
+                     "discovery_attempts": self.dtmf_discovery_attempts if self.dtmf_frame else None,
                      "discovery_received": self.dtmf_discovery_received if self.dtmf_frame else None,
                      "discovery_reply_sent": self.dtmf_discovery_reply_sent if not self.dtmf_frame else None,
+                     "discovery_reply_attempts": self.dtmf_discovery_reply_attempts if not self.dtmf_frame else None,
+                     "discovery_received_count": self.dtmf_discovery_received_count if not self.dtmf_frame else None,
                      "a_to_b_sent": self.dtmf_sent if self.dtmf_frame else None,
                      "a_to_b_received": self.dtmf_received if not self.dtmf_frame else None,
                      "b_to_a_sent": self.dtmf_ack_sent if not self.dtmf_frame else None,
                      "b_to_a_received": self.dtmf_received if self.dtmf_frame else None,
                      "controller_confirmed": self.dtmf_controller_confirmed,
                      "send_method": self.dtmf_method, "receive_method": self.dtmf_received_method,
-                     "received_digits": self.dtmf_receiver.digits_seen,
-                     "invalid_frames": self.dtmf_receiver.invalid,
-                     "identification_duration_s": round(self.dtmf_completed_at - self.started, 3) if self.dtmf_completed_at and self.started else None,
-                     "audio_start_s": IDENTIFICATION_SECONDS if (self.dtmf_frame or self.dtmf_expected) else 0},
+                     "received_digits": self.dtmf_receiver.digits_seen + self.dtmf_numeric_receiver.digits_seen,
+                     "invalid_frames": self.dtmf_receiver.invalid + self.dtmf_numeric_receiver.invalid,
+                     "identification_duration_s": round(self.dtmf_completed_at - (self.dtmf_started_at or self.started), 3) if self.dtmf_completed_at and self.started else None,
+                     "audio_start_s": (self.audio_phase_offset_s or IDENTIFICATION_SECONDS) if (self.dtmf_frame or self.dtmf_expected) else 0},
         }
         self.agent.journal.record(
             "audio",
@@ -505,8 +569,9 @@ class ProbeAccount(pj.Account):
         call = ProbeCall(self, run_id, min(prep["duration_s"] if prep else self.config.get("max_duration_s", 300), self.config.get("max_duration_s", 300)), prm.callId)
         call.is_incoming = True
         call.dtmf_receiver.expected_kind = "1"
+        call.dtmf_numeric_receiver.expected_kind = "1"
         call.dtmf_expected = any(value.get("account_id") == self.config["id"] and
-                                 value.get("dtmf_protocol") == 1 and
+                                 value.get("dtmf_protocol") in (1, 2) and
                                  value.get("expires", 0) > time.monotonic()
                                  for value in self.agent.prepared.values())
         call.preferred = prep.get("preferred_codec") if prep else None
@@ -814,7 +879,7 @@ class Agent:
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
-                "dtmf_identification": {"protocol": 1, "methods": ["rtp_telephone_event"], "window_s": 10, "discovery": True},
+                "dtmf_identification": {"protocol": 2, "protocols": [1, 2], "methods": ["rtp_telephone_event"], "window_s": 10, "discovery": True},
                 "media_quality": {"protocol": 1, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
@@ -1164,11 +1229,15 @@ class Agent:
                     call = ProbeCall(account, rid, payload["duration_s"])
                     identification = payload.get("dtmf")
                     if identification is not None:
-                        if not isinstance(identification, dict) or identification.get("protocol") != 1 or not decode_dtmf(identification.get("frame")) or decode_dtmf(identification["frame"])[0] != "1":
+                        protocol = identification.get("protocol") if isinstance(identification, dict) else None
+                        decoder = decode_numeric if protocol == 2 else decode_dtmf if protocol == 1 else None
+                        if not decoder or not decoder(identification.get("frame")) or decoder(identification["frame"])[0] != "1":
                             raise ValueError("DTMF_PROTOCOL_INVALID: Trame d'identification invalide.")
+                        call.dtmf_protocol = protocol
                         call.dtmf_frame = identification["frame"]
-                        call.dtmf_discovery = identification.get("discovery") is True
+                        call.dtmf_discovery = protocol == 2 or identification.get("discovery") is True
                         call.dtmf_receiver.expected_kind = "2"
+                        call.dtmf_numeric_receiver.expected_kind = "2"
                         call.dtmf_status = "waiting_media"
                     call.preferred = payload.get("preferred_codec")
                     call.scenario_type = payload.get("scenario_type", "probe")
@@ -1532,12 +1601,13 @@ class Agent:
             return
         if call.is_incoming:
             reply = result.get("reply_frame")
-            if reply and decode_dtmf(reply) and decode_dtmf(reply)[0] == "2" and not call.dtmf_ack_sent:
+            decoder = decode_numeric if call.dtmf_protocol == 2 else decode_dtmf
+            if reply and decoder(reply) and decoder(reply)[0] == "2" and not call.dtmf_ack_sent:
                 call.dtmf_ack_sent = call.send_dtmf(reply)
                 call.dtmf_status = "ack_sent" if call.dtmf_ack_sent else call.dtmf_status
                 if call.dtmf_ack_sent:
                     call.dtmf_completed_at = time.monotonic()
-                    self.dtmf_status_queries.put({"local_call_id": local_call_id, "deadline": call.started + IDENTIFICATION_SECONDS})
+                    self.dtmf_status_queries.put({"local_call_id": local_call_id, "deadline": (call.dtmf_started_at or call.started) + IDENTIFICATION_SECONDS})
                     self.poll_now.set()
         else:
             call.dtmf_controller_confirmed = result.get("confirmed") is True
