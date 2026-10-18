@@ -17,7 +17,7 @@ def reference(path, seconds=1, rate=8000, envelope=False):
         w.writeframes(pcm.tobytes())
 
 
-def analyze(path):
+def analyze(path, start_s=0):
     with wave.open(str(path), "rb") as w:
         rate = w.getframerate()
         x = (
@@ -26,7 +26,9 @@ def analyze(path):
         )
     # Ignore media startup and hangup transients, independent of reference phase.
     trim = int(rate * 0.25)
-    x = x[trim:-trim] if len(x) > 2 * trim else np.array([])
+    offset_start = max(0.0, float(start_s)) + 0.25
+    first_sample = int(rate * offset_start)
+    x = x[first_sample:-trim] if len(x) > first_sample + trim else np.array([])
     n = int(rate * 0.02)
     frames = []
     gaps = []
@@ -41,7 +43,7 @@ def analyze(path):
         residual = float(np.sqrt(np.mean((v - fit) ** 2)))
         ratio = float(np.mean(fit * fit) / (np.mean(v * v) + 1e-15))
         missing = rms < 0.005 or ratio < 0.5
-        offset = round(0.25 + i / rate, 3)
+        offset = round(offset_start + i / rate, 3)
         frames.append(
             {
                 "offset_s": offset,
@@ -60,7 +62,7 @@ def analyze(path):
             start = None
     if start is not None:
         gaps.append(
-            {"start_s": start, "duration_s": round(0.25 + len(x) / rate - start, 3)}
+            {"start_s": start, "duration_s": round(offset_start + len(x) / rate - start, 3)}
         )
     level = float(np.sqrt(np.mean(x * x))) if len(x) else 0
     return {
@@ -84,7 +86,7 @@ def analyze(path):
         "interruptions": gaps,
         "interrupted_s": round(sum(g["duration_s"] for g in gaps), 3),
         "timeline": frames,
-        "method": "20 ms RMS + phase independent 1 kHz sine/cosine fit; 250 ms edge trim",
+        "method": "20 ms RMS + phase independent 1 kHz sine/cosine fit; 250 ms edge trim" + (f"; first {start_s:g} s reserved for DTMF" if start_s else ""),
         "perceptual_mos": None,
     }
 

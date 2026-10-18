@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 """Construction locale Agent uniquement ; manifeste signé, aucun upload implicite."""
-if __name__ == '__main__':
-    from storage_maintenance import guard
-    guard(8)
-
 import argparse
 import gzip
 import hashlib
@@ -139,7 +135,7 @@ CMD ["python3","agent/src/main.py"]
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
     manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':dirty,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013',version],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017',version],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:
@@ -164,5 +160,7 @@ CMD ["python3","agent/src/main.py"]
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
+    from storage_maintenance import guard
+    guard(6 if a.runtime_release else 8)
     try:pack(a)
     except (ValueError,subprocess.CalledProcessError):raise SystemExit('Construction de distribution Agent refusée ; aucun upload effectué.') from None

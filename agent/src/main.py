@@ -15,6 +15,7 @@ from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
 from rtp_quality import ReceiverQuality, annotate_pjsip_jitter
+from dtmf_identity import FrameReceiver, IDENTIFICATION_SECONDS, DTMF_DURATION_MS, decode as decode_dtmf, frame as dtmf_frame
 
 ADMIN_FIELDS = (
     "organization",
@@ -74,6 +75,20 @@ class ProbeCall(pj.Call):
         self.closing_at = None
         self.ended = None
         self.recording = self.agent.data / (run_id + ".wav")
+        self.dtmf_frame = None
+        self.dtmf_receiver = FrameReceiver()
+        self.dtmf_event_ids = set()
+        self.dtmf_sent = False
+        self.dtmf_ack_sent = False
+        self.dtmf_received = False
+        self.dtmf_controller_confirmed = False
+        self.dtmf_status = "not_requested"
+        self.dtmf_method = None
+        self.dtmf_received_method = None
+        self.dtmf_completed_at = None
+        self.is_incoming = False
+        self.dtmf_expected = False
+        self.audio_phase_started = False
 
     def onCallState(self, prm):
         info = self.getInfo()
@@ -81,6 +96,8 @@ class ProbeCall(pj.Call):
         self.last_code = info.lastStatusCode
         if info.state == pj.PJSIP_INV_STATE_CONFIRMED:
             self.started = self.started or time.monotonic()
+            if self.dtmf_receiver.started is None:
+                self.dtmf_receiver.start()
             self.established = True
             self.events.append({"kind": "confirmed", "at": utc()})
             self.agent.journal.record(
@@ -122,6 +139,77 @@ class ProbeCall(pj.Call):
             self.media.startTransmit(self.recorder)
         except pj.Error:
             self.events.append({"kind": "media_not_ready", "at": utc()})
+
+    def onDtmfDigit(self, prm):
+        method = ("rtp_telephone_event" if prm.method == pj.PJSUA_DTMF_METHOD_RFC2833 else
+                  "sip_info" if prm.method == pj.PJSUA_DTMF_METHOD_SIP_INFO else None)
+        if method != "sip_info":
+            return
+        self._receive_dtmf_digit(prm.digit, method)
+
+    def onDtmfEvent(self, prm):
+        if prm.method != pj.PJSUA_DTMF_METHOD_RFC2833:
+            return
+        # RFC 4733 updates and repeated end packets share an event timestamp.
+        # Distinct consecutive identical digits have distinct timestamps.
+        key = (prm.timestamp, prm.digit)
+        if key in self.dtmf_event_ids or len(self.dtmf_event_ids) >= 64:
+            return
+        self.dtmf_event_ids.add(key)
+        self._receive_dtmf_digit(prm.digit, "rtp_telephone_event")
+
+    def _receive_dtmf_digit(self, digit, method):
+        if self.is_incoming:
+            self.dtmf_expected = True
+        result = self.dtmf_receiver.feed(digit)
+        if result is None:
+            return
+        kind, code = result
+        if (kind == "1" and self.is_incoming) or (kind == "2" and not self.is_incoming and self.dtmf_frame is not None):
+            self.dtmf_received = True
+            self.dtmf_received_method = method
+            self.dtmf_status = "received_pending_server"
+            self.agent.dtmf_observations.put({"local_call_id": self.run_id,
+                "account_id": self.account.config["id"], "frame": dtmf_frame(kind, code),
+                "method": method, "deadline": (self.started or time.monotonic()) + IDENTIFICATION_SECONDS})
+            self.agent.poll_now.set()
+
+    def send_dtmf(self, digits):
+        if not self.started or self.finished or time.monotonic() - self.started >= IDENTIFICATION_SECONDS:
+            self.dtmf_status = "timeout"
+            return False
+        try:
+            parameters = pj.CallSendDtmfParam()
+            parameters.method = pj.PJSUA_DTMF_METHOD_RFC2833
+            parameters.duration = DTMF_DURATION_MS
+            parameters.digits = digits
+            self.sendDtmf(parameters)
+            self.dtmf_method = "rtp_telephone_event"
+            return True
+        except pj.Error as error:
+            self.dtmf_status = "transport_unavailable"
+            self.events.append({"kind": "dtmf_send_failed", "at": utc(), "status": getattr(error, "status", None)})
+            return False
+
+    def identification_tick(self):
+        if not self.started or self.finished:
+            return
+        elapsed = time.monotonic() - self.started
+        if self.dtmf_frame and self.media is not None and not self.dtmf_sent and elapsed < IDENTIFICATION_SECONDS:
+            self.dtmf_sent = self.send_dtmf(self.dtmf_frame)
+            if self.dtmf_sent:
+                self.dtmf_status = "a_to_b_sent"
+        if elapsed >= IDENTIFICATION_SECONDS and self.dtmf_status in ("a_to_b_sent", "received_pending_server", "ack_sent"):
+            self.dtmf_status = "timeout"
+        if elapsed >= IDENTIFICATION_SECONDS and self.dtmf_expected and self.dtmf_status == "not_requested":
+            self.dtmf_status = ("invalid_frame" if self.dtmf_receiver.invalid else
+                                "incomplete" if self.dtmf_receiver.digits_seen else "not_received")
+        if (self.dtmf_frame or self.dtmf_expected) and not self.audio_phase_started and elapsed >= IDENTIFICATION_SECONDS:
+            # Drain the native observer at the phase boundary. DTMF can suppress
+            # regular audio RTP, so its decoder erasures must remain diagnostic only.
+            self.collect_receiver_quality(force=True)
+            self.receiver_quality.begin_audio_phase()
+            self.audio_phase_started = True
 
     def sample(self):
         if not self.established or self.finished:
@@ -289,7 +377,11 @@ class ProbeCall(pj.Call):
         audio = None
         try:
             if self.recording.exists():
-                audio = (analyze_echo(self.recording, self.agent.echo_tone) if self.scenario_type == "echo" else observe_audio(self.recording) if self.scenario_type == "destination" else analyze(self.recording))
+                audio_start = IDENTIFICATION_SECONDS if (self.dtmf_frame or self.dtmf_expected) else 0
+                if audio_start and elapsed <= audio_start + 0.5:
+                    self.events.append({"kind": "audio_phase_unavailable", "at": utc()})
+                else:
+                    audio = (analyze_echo(self.recording, self.agent.echo_tone) if self.scenario_type == "echo" else observe_audio(self.recording) if self.scenario_type == "destination" else analyze(self.recording, start_s=audio_start))
         except Exception as error:
             self.events.append(
                 {
@@ -313,6 +405,17 @@ class ProbeCall(pj.Call):
             "rtp": self.stats,
             "audio": audio,
             "events": self.events,
+            "dtmf": {"protocol": 1, "status": self.dtmf_status,
+                     "a_to_b_sent": self.dtmf_sent if self.dtmf_frame else None,
+                     "a_to_b_received": self.dtmf_received if not self.dtmf_frame else None,
+                     "b_to_a_sent": self.dtmf_ack_sent if not self.dtmf_frame else None,
+                     "b_to_a_received": self.dtmf_received if self.dtmf_frame else None,
+                     "controller_confirmed": self.dtmf_controller_confirmed,
+                     "send_method": self.dtmf_method, "receive_method": self.dtmf_received_method,
+                     "received_digits": self.dtmf_receiver.digits_seen,
+                     "invalid_frames": self.dtmf_receiver.invalid,
+                     "identification_duration_s": round(self.dtmf_completed_at - self.started, 3) if self.dtmf_completed_at and self.started else None,
+                     "audio_start_s": IDENTIFICATION_SECONDS if (self.dtmf_frame or self.dtmf_expected) else 0},
         }
         self.agent.journal.record(
             "audio",
@@ -373,6 +476,12 @@ class ProbeAccount(pj.Account):
         run_id = matched or str(uuid.uuid4())
         prep = self.agent.prepared.get(matched)
         call = ProbeCall(self, run_id, min(prep["duration_s"] if prep else self.config.get("max_duration_s", 300), self.config.get("max_duration_s", 300)), prm.callId)
+        call.is_incoming = True
+        call.dtmf_receiver.expected_kind = "1"
+        call.dtmf_expected = any(value.get("account_id") == self.config["id"] and
+                                 value.get("dtmf_protocol") == 1 and
+                                 value.get("expires", 0) > time.monotonic()
+                                 for value in self.agent.prepared.values())
         call.preferred = prep.get("preferred_codec") if prep else None
         call.destination = self.config["username"]
         op = pj.CallOpParam()
@@ -453,6 +562,8 @@ class Agent:
             )
         self.report_outbox = ReportOutbox(self.db, self.lock)
         self.inbox = queue.Queue()
+        self.dtmf_observations = queue.Queue()
+        self.dtmf_status_queries = queue.Queue()
         self.accounts = {}
         self.calls = {}
         self.prepared = {}
@@ -676,6 +787,7 @@ class Agent:
                 "scenario_types": ["probe", "destination", "echo"],
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
+                "dtmf_identification": {"protocol": 1, "methods": ["rtp_telephone_event"], "window_s": 10},
                 "media_quality": {"protocol": 1, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
@@ -1023,6 +1135,13 @@ class Agent:
                     if rid in self.calls:
                         raise ValueError("Duplicate execution")
                     call = ProbeCall(account, rid, payload["duration_s"])
+                    identification = payload.get("dtmf")
+                    if identification is not None:
+                        if not isinstance(identification, dict) or identification.get("protocol") != 1 or not decode_dtmf(identification.get("frame")) or decode_dtmf(identification["frame"])[0] != "1":
+                            raise ValueError("DTMF_PROTOCOL_INVALID: Trame d'identification invalide.")
+                        call.dtmf_frame = identification["frame"]
+                        call.dtmf_receiver.expected_kind = "2"
+                        call.dtmf_status = "waiting_media"
                     call.preferred = payload.get("preferred_codec")
                     call.scenario_type = payload.get("scenario_type", "probe")
                     if call.scenario_type not in ("probe", "destination", "echo"):
@@ -1189,6 +1308,35 @@ class Agent:
                         self.poll_now.wait(6)
                         self.poll_now.clear()
                         continue
+                for _ in range(min(self.dtmf_observations.qsize(), 16)):
+                    observation = self.dtmf_observations.get_nowait()
+                    if time.monotonic() > observation["deadline"]:
+                        self.inbox.put(("dtmf_result", (observation["local_call_id"], {"accepted": False, "error": "timeout"})))
+                        continue
+                    try:
+                        response = self.api("POST", "dtmf/observe", json={key: observation[key] for key in ("local_call_id", "account_id", "frame", "method")})
+                        if response.status_code in (408, 429) or response.status_code >= 500:
+                            self.dtmf_observations.put(observation)
+                            continue
+                        if response.status_code >= 400:
+                            result = {"accepted": False, "error": "http_" + str(response.status_code)}
+                        else:
+                            result = response.json()
+                        self.inbox.put(("dtmf_result", (observation["local_call_id"], result)))
+                    except (requests.RequestException, ValueError):
+                        self.dtmf_observations.put(observation)
+                for _ in range(min(self.dtmf_status_queries.qsize(), 16)):
+                    query = self.dtmf_status_queries.get_nowait()
+                    if time.monotonic() > query["deadline"]:
+                        continue
+                    try:
+                        response = self.api("GET", "dtmf/status/" + query["local_call_id"])
+                        if response.ok and response.json().get("confirmed") is True:
+                            self.inbox.put(("dtmf_status", query["local_call_id"]))
+                        elif response.ok or response.status_code in (408, 429) or response.status_code >= 500:
+                            self.dtmf_status_queries.put(query)
+                    except (requests.RequestException, ValueError):
+                        self.dtmf_status_queries.put(query)
                 if cycle % 5 == 0:
                     response = self.api("GET", "config")
                     response.raise_for_status()
@@ -1347,6 +1495,35 @@ class Agent:
                     pass
             time.sleep(1)
 
+    def apply_dtmf_result(self, local_call_id, result):
+        call = self.calls.get(local_call_id)
+        if not call or call.finished:
+            return
+        if not result.get("accepted"):
+            call.dtmf_status = result.get("error", "validation_failed")
+            return
+        if call.is_incoming:
+            reply = result.get("reply_frame")
+            if reply and decode_dtmf(reply) and decode_dtmf(reply)[0] == "2" and not call.dtmf_ack_sent:
+                call.dtmf_ack_sent = call.send_dtmf(reply)
+                call.dtmf_status = "ack_sent" if call.dtmf_ack_sent else call.dtmf_status
+                if call.dtmf_ack_sent:
+                    call.dtmf_completed_at = time.monotonic()
+                    self.dtmf_status_queries.put({"local_call_id": local_call_id, "deadline": call.started + IDENTIFICATION_SECONDS})
+                    self.poll_now.set()
+        else:
+            call.dtmf_controller_confirmed = result.get("confirmed") is True
+            call.dtmf_status = "confirmed" if call.dtmf_controller_confirmed else "validation_failed"
+            if call.dtmf_controller_confirmed:
+                call.dtmf_completed_at = time.monotonic()
+
+    def apply_dtmf_status(self, local_call_id):
+        call = self.calls.get(local_call_id)
+        if call and call.is_incoming and not call.finished:
+            call.dtmf_controller_confirmed = True
+            call.dtmf_status = "confirmed"
+            call.dtmf_completed_at = time.monotonic()
+
     def run(self, *, enable_web=True, install_signals=True, export_management=True):
         # Portable mode never constructs the administrative HTTP server.
         web_server = build_server(self) if enable_web else None
@@ -1393,6 +1570,10 @@ class Agent:
                         self.revoke_configuration()
                     elif kind == "command" and value[0] == self.connection_generation:
                         self.execute(value[1])
+                    elif kind == "dtmf_result":
+                        self.apply_dtmf_result(*value)
+                    elif kind == "dtmf_status":
+                        self.apply_dtmf_status(value)
                 except queue.Empty:
                     pass
                 except (pj.Error, ValueError):
@@ -1401,6 +1582,7 @@ class Agent:
                 now = time.monotonic()
                 self.respond_incoming()
                 for rid, call in list(self.calls.items()):
+                    call.identification_tick()
                     if call.answer_at is not None and now >= call.answer_at and not call.finished:
                         call.answer_at = None
                         op = pj.CallOpParam()

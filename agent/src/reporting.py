@@ -49,7 +49,7 @@ class ReportOutbox:
             fields = []
             try:
                 errors = response.json().get("errors", {})
-                allowed = {"established", "sip", "duration_s", "rtp", "audio", "events", "incoming"}
+                allowed = {"established", "sip", "duration_s", "rtp", "audio", "events", "incoming", "dtmf"}
                 fields = sorted(k for k in errors if isinstance(k, str) and len(k) <= 100 and k.split('.')[0] in allowed and re.fullmatch(r'[a-zA-Z0-9_.]+', k))[:30]
             except (ValueError, AttributeError, TypeError):
                 pass

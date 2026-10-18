@@ -1,3 +1,8 @@
+## Agent Bêta 0.9-019 — installateurs 1.0.2
+
+Identification bidirectionnelle des Agents compatibles par RTP telephone-event pendant les dix premières secondes de l'appel. Les observations DTMF sont confirmées par le Controller et permettent d'associer deux rapports RTP malgré des Call-ID SIP distincts. Les mesures audio de référence utilisent la phase après identification ; les compteurs bruts restent consultables. Le runtime PJSIP/PJSUA2 corrigé de 0.9-017 et le gestionnaire de mise à jour officiel sont conservés. Les Agents 0.9-017 restent compatibles avec le Controller 0.9-019 pendant la montée de version. Aucun EXE Windows client n'est publié. Voir [la qualification 0.9-019](docs/qualification-0.9-019.md).
+
+
 ## Agent Bêta 0.9-017 — installateurs 1.0.2
 
 Correction arithmétique exacte du calcul de jitter dans PJSIP 2.16, vérifiée après longue durée de fonctionnement, sur PCMA, PCMU et G.722. Runtimes natifs Debian 12/Ubuntu 24.04 AMD64 et image Docker AMD64 reconstruits. Distribution et mises à jour par le gestionnaire officiel, avec manifestes signés et sources correspondantes. Compatibilité Synology Intel/AMD64 via Docker qualifiée sur profil logiciel, sans essai sur NAS physique. Windows reste réservé au LAB, sans EXE client Authenticode. Voir [la qualification 0.9-017](docs/qualification-0.9-017.md).

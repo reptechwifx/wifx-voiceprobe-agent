@@ -57,6 +57,19 @@ class ReceiverQuality:
         self.codecs = set()
         self.format_stable = True
         self.last = None
+        self.audio_baseline = None
+        self.audio_interval_index = None
+
+    def begin_audio_phase(self):
+        """Snapshot decoder counters after identification; retain full-call observations."""
+        if self.audio_baseline is not None:
+            return
+        if self.last is None:
+            self.audio_baseline = (0, 0, 0, 0.0)
+        else:
+            self.audio_baseline = (self.last['total_received'], self.last['total_lost'],
+                                   self.last['total_loss_runs'], self.end_ms)
+        self.audio_interval_index = len(self.intervals)
 
     def add(self, observation, codec=None):
         if observation.get('protocol') != 1:
@@ -142,11 +155,22 @@ class ReceiverQuality:
             'duplicates': self.last['duplicates'], 'reordered': self.last['reordered'], 'excluded': self.last['excluded'],
             'out_of_range': self.last['overflow'], 'observed_s': round(self.end_ms / 1000, 3)},
             'playout': self.playout(codec, self.last['total_received'], self.last['total_lost'], self.last['total_loss_runs']), 'intervals': []}
+        if self.audio_baseline is not None:
+            received, lost, runs, start_ms = self.audio_baseline
+            deltas = (self.last['total_received'] - received, self.last['total_lost'] - lost,
+                      self.last['total_loss_runs'] - runs)
+            audio = self.playout(codec, *[max(0, value) for value in deltas])
+            audio['valid'] = bool(audio['valid'] and all(value >= 0 for value in deltas)
+                                  and deltas[0] + deltas[1] > 0 and deltas[2] <= deltas[1])
+            result['audio_phase'] = {'method': 'decoder-counter-baseline-v1',
+                                     'start_observed_s': round(start_ms / 1000, 3),
+                                     'playout': audio}
         if self.last.get('pjsip_jitter', {}).get('method') == 'vp-rtcp-safe-v1':
             result['pjsip_jitter'] = dict(self.last['pjsip_jitter'])
-        for interval in self.intervals:
+        for index, interval in enumerate(self.intervals):
             summary = {key: interval[key] for key in ['count', 'min_ms', 'max_ms', 'sum_ms', 'p95_transit_ms']}
             result['intervals'].append({'offset_s': interval['offset_s'], 'duration_s': interval['duration_s'],
+                'phase': 'audio' if self.audio_interval_index is not None and index >= self.audio_interval_index else 'identification' if self.audio_baseline is not None else 'full_call',
                 'timing': {'method': 'rtp-arrival-v1', 'representation': 'transit-summary-v1', 'clock_stable': bool(self.valid and interval['valid']),
                            'ssrc': self.ssrc, 'reference_min_ms': self.minimum, 'resolution_ms': .25, 'summary': summary},
                 'playout': dict(self.playout(codec, interval['received'], interval['lost'], interval['loss_runs'], interval['distribution_protocol']), starts_lost=interval['starts_lost'], ends_lost=interval['ends_lost']), 'jitter_ms_mean': interval['jitter_ms_mean']})

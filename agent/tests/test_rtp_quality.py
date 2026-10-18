@@ -89,4 +89,16 @@ class ReceiverPrecisionTest(unittest.TestCase):
         self.assertEqual(q.count,600);self.assertEqual(len(q.histogram),1);self.assertEqual(len(q.intervals),300)
         self.assertLess(len(json.dumps(q.snapshot('G722'))),250000)
 
+    def test_dtmf_decoder_erasures_remain_raw_but_audio_phase_uses_later_counters(self):
+        rows = self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 200\nf 2 300\ns 10000\n'
+                            'p 3 420 11000 1\np 4 580 11020 1\nf 1 200\ns 12000\n')
+        q = ReceiverQuality().add(rows[0], 'PCMA/8000')
+        q.begin_audio_phase()
+        q.add(rows[1], 'PCMA/8000')
+        result = q.snapshot('PCMA/8000')
+        self.assertEqual(result['playout']['lost'], 300)
+        self.assertEqual(result['audio_phase']['playout']['lost'], 0)
+        self.assertEqual(result['audio_phase']['playout']['received'], 200)
+        self.assertEqual([i['phase'] for i in result['intervals']], ['identification', 'audio'])
+
 if __name__=='__main__':unittest.main()

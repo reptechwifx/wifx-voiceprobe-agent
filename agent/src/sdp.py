@@ -22,6 +22,7 @@ def constrain_audio(sdp, allowed, preferred=None):
             fields = line.split()
             payloads = [p for p in fields[3:] if names.get(p) in effective]
             payloads.sort(key=lambda p: effective.index(names[p]))
+            payloads += [p for p in fields[3:] if names.get(p, "").lower() == "telephone-event/8000"]
             removed.update(set(fields[3:]) - set(payloads))
             result.append(" ".join(fields[:3] + payloads))
         else:
