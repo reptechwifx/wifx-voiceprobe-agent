@@ -139,7 +139,7 @@ CMD ["python3","agent/src/main.py"]
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
     manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':development,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020',version],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':list(dict.fromkeys(['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020','0.9-021',version])),'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:
