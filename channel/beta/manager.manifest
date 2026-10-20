@@ -1,8 +1,8 @@
 schema=1
-sequence=2026102005
-expires=1800263285
-manager=agent-manager-36373b231c8b.py
-manager_sha256=36373b231c8bcfdc43f94e3922fedcb95c40eb32dc3db17ec14054fe24e2afc2
-manager_bytes=101618
-source_revision=ff7c61d83bde0cca0329cfd902b25fbe172a0ba0
-artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-024-manager-hotfix-2
+sequence=2026102006
+expires=1800264155
+manager=agent-manager-714ca1134ea8.py
+manager_sha256=714ca1134ea803105293a83da667b9cdc9a58969a76662873f53762160b5b0f7
+manager_bytes=101704
+source_revision=0b0b00d10e8a78b02b4746fc4f1629b6269429e0
+artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-024-manager-hotfix-3
