@@ -15,6 +15,8 @@ from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
 from rtp_quality import ReceiverQuality, annotate_pjsip_jitter
+from network_diagnostics import (INITIAL_METHOD, MEDIA_DSCP, SIP_DSCP, observed_peer,
+    set_dscp, start as start_network_diagnostic, unavailable as network_unavailable)
 from dtmf_identity import (FrameReceiver, NumericFrameReceiver, IDENTIFICATION_SECONDS, DTMF_DURATION_MS,
     NUMERIC_DTMF_DURATION_MS,
     DISCOVERY_REQUEST, DISCOVERY_REPLY, NUMERIC_DISCOVERY_REQUEST, NUMERIC_DISCOVERY_REPLY,
@@ -108,6 +110,13 @@ class ProbeCall(pj.Call):
         self.audio_phase_started = False
         self.rtp_audio_baseline = None
         self.audio_phase_offset_s = None
+        self.network_peer = None
+        self.network_jobs = {}
+        self.network_results = {}
+        self.network_started = set()
+        self.network_phases = {}
+        self.audio_report = None
+        self.audio_report_analyzed = False
 
     def onCallState(self, prm):
         info = self.getInfo()
@@ -401,6 +410,69 @@ class ProbeCall(pj.Call):
         except pj.Error:
             pass
 
+    def diagnostics_tick(self):
+        if not self.started or self.finished:
+            return
+        elapsed = time.monotonic() - (self.dtmf_started_at or self.started)
+        peer = observed_peer(self.stats.get("observed_rtp_source"))
+        if peer and not self.network_peer:
+            self.network_peer = peer
+        if not self.network_peer:
+            return
+        # Discovery consumes the first ten seconds of a v2 call. Probe only
+        # after that interval, on a separate diagnostic port and worker thread.
+        initial_key = "icmp_initial" if INITIAL_METHOD == "icmp" else "udp"
+        if (initial_key not in self.network_started
+                and (self.audio_phase_started or elapsed >= IDENTIFICATION_SECONDS)):
+            if INITIAL_METHOD == "icmp":
+                self._start_network_diagnostic("icmp", slot=initial_key)
+            else:
+                self._start_network_diagnostic("udp")
+        no_dtmf = not (self.dtmf_frame or self.dtmf_expected)
+        if "icmp" not in self.network_started and (self.audio_phase_started or no_dtmf and elapsed >= IDENTIFICATION_SECONDS):
+            rx = self.stats.get("rx", {})
+            phase = rx if no_dtmf else (rx.get("audio_phase_rtp") or {})
+            received, lost = phase.get("received"), phase.get("lost")
+            if no_dtmf:
+                received, lost = rx.get("packets"), rx.get("loss")
+            valid = (phase.get("valid") is True if not no_dtmf else
+                     type(received) is int and type(lost) is int)
+            # Use the same received/lost RTP population graded by MediaQuality.
+            # Decoder erasures alone are not an RTP loss classification.
+            if (valid and type(received) is int and type(lost) is int
+                    and received >= 0 and lost >= 0 and received + lost >= 100
+                    and 100 * lost / (received + lost) > 1):
+                self._start_network_diagnostic("icmp")
+
+    def _start_network_diagnostic(self, method, phase="during_call", slot=None):
+        key = slot or method
+        self.network_started.add(key)
+        self.network_phases[key] = phase
+        try:
+            job = start_network_diagnostic(method, self.network_peer)
+            if job is None:
+                self.network_results[key] = network_unavailable("agent_probe_limit", method, self.network_peer)
+            else:
+                self.network_jobs[key] = job
+        except (OSError, ValueError):
+            self.network_results[key] = network_unavailable("probe_start_failed", method, self.network_peer)
+
+    def completed_network_diagnostics(self):
+        for method, job in list(self.network_jobs.items()):
+            if not job.done():
+                return None
+            try:
+                self.network_results[method] = job.result()
+            except Exception:
+                self.network_results[method] = network_unavailable("probe_failed", method, self.network_peer)
+            del self.network_jobs[method]
+        initial_key = "icmp_initial" if INITIAL_METHOD == "icmp" else "udp"
+        if initial_key not in self.network_results:
+            self.network_results[initial_key] = network_unavailable(
+                "call_too_short" if self.network_peer else "rtp_peer_not_observed", INITIAL_METHOD, self.network_peer)
+        return [dict(self.network_results[name], phase=self.network_phases.get(name, "during_call"))
+                for name in (initial_key, "icmp") if name in self.network_results]
+
     def collect_receiver_quality(self, force=False):
         if not hasattr(self, 'getVoiceProbeStats'):
             return
@@ -459,22 +531,35 @@ class ProbeCall(pj.Call):
         self.player = None
         self.recorder = None
         gc.collect()
-        audio = None
-        try:
-            if self.recording.exists():
-                audio_start = (self.audio_phase_offset_s or IDENTIFICATION_SECONDS) if (self.dtmf_frame or self.dtmf_expected) else 0
-                if audio_start and elapsed <= audio_start + 0.5:
-                    self.events.append({"kind": "audio_phase_unavailable", "at": utc()})
-                else:
-                    audio = (analyze_echo(self.recording, self.agent.echo_tone) if self.scenario_type == "echo" else observe_audio(self.recording) if self.scenario_type == "destination" else analyze(self.recording, start_s=audio_start))
-        except Exception as error:
-            self.events.append(
-                {
-                    "kind": "recording_analysis_failed",
-                    "at": utc(),
-                    "error": type(error).__name__ + ": " + str(error)[:160],
-                }
-            )
+        if not self.audio_report_analyzed:
+            try:
+                if self.recording.exists():
+                    audio_start = (self.audio_phase_offset_s or IDENTIFICATION_SECONDS) if (self.dtmf_frame or self.dtmf_expected) else 0
+                    if audio_start and elapsed <= audio_start + 0.5:
+                        self.events.append({"kind": "audio_phase_unavailable", "at": utc()})
+                    else:
+                        self.audio_report = (analyze_echo(self.recording, self.agent.echo_tone) if self.scenario_type == "echo" else observe_audio(self.recording) if self.scenario_type == "destination" else analyze(self.recording, start_s=audio_start))
+            except Exception as error:
+                self.events.append(
+                    {
+                        "kind": "recording_analysis_failed",
+                        "at": utc(),
+                        "error": type(error).__name__ + ": " + str(error)[:160],
+                    }
+                )
+            self.audio_report_analyzed = True
+            audio = self.audio_report or {}
+            analyzed, interrupted = audio.get("analyzed_s"), audio.get("interrupted_s")
+            if (self.network_peer and "icmp" not in self.network_started and self.incoming is None
+                    and audio.get("reference_available", True) is True
+                    and isinstance(analyzed, (int, float)) and isinstance(interrupted, (int, float))
+                    and analyzed > 0 and interrupted >= 0
+                    and (interrupted > 1 or 100 * interrupted / analyzed > 3)):
+                self._start_network_diagnostic("icmp", phase="after_call")
+        network_diagnostics = self.completed_network_diagnostics()
+        if network_diagnostics is None:
+            return False
+        audio = self.audio_report
         metrics = {
             "established": self.established,
             "duration_s": round(elapsed, 3),
@@ -488,6 +573,10 @@ class ProbeCall(pj.Call):
                 "codec": self.codec,
             },
             "rtp": self.stats,
+            "network_diagnostics": network_diagnostics,
+            "qos": ({"packet_capture_verified": False} if os.name == "nt" else
+                    {"rtp_dscp_requested": MEDIA_DSCP, "rtcp_dscp_requested": MEDIA_DSCP,
+                     "sip_dscp_requested": SIP_DSCP, "packet_capture_verified": False}),
             "audio": audio,
             "events": self.events,
             "dtmf": {"protocol": self.dtmf_protocol, "status": self.dtmf_status,
@@ -684,6 +773,7 @@ class Agent:
         for transport in (pj.PJSIP_TRANSPORT_UDP, pj.PJSIP_TRANSPORT_TCP):
             tc = pj.TransportConfig()
             tc.port = int(self.cfg.get("sip_port", 5060))
+            set_dscp(tc, pj, SIP_DSCP)
             self.endpoint.transportCreate(transport, tc)
         self.endpoint.libStart()
         self.endpoint.audDevManager().setNullDev()
@@ -932,7 +1022,7 @@ class Agent:
             "local_max_calls": self.cfg["max_calls"],
             "controller_max_calls": remote.get("max_calls"),
             "maintenance": self.maintenance.status(),
-            "active_calls": len(self.calls),
+            "active_calls": sum(not call.finished for call in self.calls.values()),
             "calls": list(self.calls),
             "call_details": [
                 {
@@ -943,7 +1033,7 @@ class Agent:
                     "duration_s": round(time.monotonic() - (c.started or c.created), 1),
                     "state": "established" if c.established else "connecting",
                 }
-                for c in list(self.calls.values())
+                for c in list(self.calls.values()) if not c.finished
             ],
             "accounts": [
                 {
@@ -985,9 +1075,9 @@ class Agent:
         central = (self.remote or {}).get("capacity_protocol") == 2
         if not central and (self.load_average() or 0) >= max(1, os.cpu_count() or 1) * self.cfg.get("max_load_per_cpu", 1.5):
             return "CPU_LOAD_EXCEEDED: Charge CPU excessive."
-        if len(self.calls) >= self.applied_capacity():
+        if sum(not call.finished for call in self.calls.values()) >= self.applied_capacity():
             return "AGENT_CAPACITY_EXHAUSTED: Capacité simultanée de la sonde atteinte."
-        if not central and sum(c.account is account for c in self.calls.values()) >= account.config["max_calls"]:
+        if not central and sum(c.account is account and not c.finished for c in self.calls.values()) >= account.config["max_calls"]:
             return "ACCOUNT_CAPACITY_EXHAUSTED: Capacité simultanée du compte SIP atteinte."
         return None
 
@@ -1140,6 +1230,7 @@ class Agent:
             ac.mediaConfig.transportConfig.publicAddress = sip_ip
             ac.mediaConfig.transportConfig.port = int(self.cfg.get("rtp_base_port", 4000)) + slot * 100
             ac.mediaConfig.transportConfig.portRange = 80
+            set_dscp(ac.mediaConfig.transportConfig, pj, MEDIA_DSCP)
             ac.sipConfig.transportId = pj.PJSUA_INVALID_ID
             if x["transport"] == "tcp":
                 ac.regConfig.registrarUri += "" if ";transport=tcp" in ac.regConfig.registrarUri else ";transport=tcp"
@@ -1691,6 +1782,7 @@ class Agent:
                             call.hangup_safe()
                     if now - last_sample > 0.1:
                         call.sample()
+                    call.diagnostics_tick()
                     if (
                         call.started and now - call.started >= call.duration
                     ) or now - call.created > call.duration + 30:
@@ -1709,7 +1801,7 @@ class Agent:
                     # Only this SIP event loop acknowledges the maintenance barrier.
                     # Expensive system/network measurements and disk I/O stay off it.
                     self.management_barrier = {"pid": os.getpid(), "sampled_at": time.time(),
-                        "prepared_calls": len(self.prepared), "active_calls": len(self.calls),
+                        "prepared_calls": len(self.prepared), "active_calls": sum(not c.finished for c in self.calls.values()),
                         "maintenance": self.maintenance.status()}
                     last_management = now
         finally:

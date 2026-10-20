@@ -180,6 +180,25 @@ class LocalSafety(unittest.TestCase):
         with self.assertRaisesRegex(m.Failure,'Persistance'):container.stop()
         self.assertTrue(all(method=='GET' for method,path in calls))
 
+    def test_docker_024_network_capability_and_legacy_rollback(self):
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data')
+        container=m.Container(manager);created=[]
+        container.inspect=lambda:None
+        container.capture=lambda:{'host':{'SecurityOpt':['no-new-privileges:true','seccomp=default'],
+                                            'CapDrop':['ALL'],'CapAdd':[]}}
+        container.engine=types.SimpleNamespace(call=lambda method,path,value=None:
+            created.append(value) or {'Id':'test-container'} if method=='POST' else {'Name':'lab'})
+        container.start({'local_image_id':'sha256:new','network_diagnostics':True},start=False)
+        host=created[-1]['HostConfig']
+        self.assertEqual(['ALL'],host['CapDrop'])
+        self.assertEqual(['NET_RAW'],host['CapAdd'])
+        self.assertEqual(['seccomp=default','no-new-privileges:false'],host['SecurityOpt'])
+        created.clear()
+        container.start({'local_image_id':'sha256:old','network_diagnostics':False},start=False)
+        legacy=created[-1]['HostConfig']
+        self.assertEqual([],legacy['CapAdd'])
+        self.assertEqual(['no-new-privileges:true','seccomp=default'],legacy['SecurityOpt'])
+
     def manager(self):
         manager=m.Manager.__new__(m.Manager);manager.code=self.root/'code';manager.code.mkdir();manager.data=self.root/'data';manager.data.mkdir()
         manager.cfg=manager.data/'config.json';m.atomic(manager.cfg,{'id':'test-id','local_password_hash':'known-hash'})

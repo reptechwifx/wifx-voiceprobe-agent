@@ -27,11 +27,13 @@ def sign(key,source,destination):run(['openssl','dgst','-sha256','-sign',str(key
 
 
 def pack(args):
+    if args.runtime_public_key and not args.runtime_release:raise ValueError('Clé de base sans release de référence.')
     source=urllib.parse.urlsplit(args.source)
     if source.scheme!='https' or not source.hostname or source.username or source.password or source.query or source.fragment:raise ValueError('Source HTTPS canonique sans identifiants requise.')
     if args.output.exists():raise ValueError('Destination existante refusée.')
     dirty=bool(run(['git','status','--porcelain'],cwd=ROOT))
     if dirty and not args.lab_development:raise ValueError('Sources commitées et propres requises pour une distribution finale.')
+    development=dirty or args.lab_development
     revision=run(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if dirty:
         h=hashlib.sha256()
@@ -84,13 +86,13 @@ def pack(args):
                     destination=target/relative;destination.parent.mkdir(parents=True,exist_ok=True);destination.write_bytes(archive.extractfile(member).read())
         binary_name=platform_key+'-'+sha(binary)[:12]+'.tar.gz'
         shutil.copy2(binary,out/binary_name)
-        dependencies=['python3','python3-venv','ca-certificates','openssl','iproute2','libopus0','libstdc++6','libgcc-s1','libgfortran5','libquadmath0']
+        dependencies=['python3','python3-venv','ca-certificates','openssl','iproute2','traceroute','libcap2-bin','libopus0','libstdc++6','libgcc-s1','libgfortran5','libquadmath0']
         dependencies+=['libssl3t64','libasound2t64'] if platform_key.startswith('ubuntu') else ['libssl3','libasound2']
         runtimes[platform_key]={**artifact(out/binary_name),'python':info['python'],'soabi':info['soabi'],'glibc':info['glibc'],'dependencies':dependencies,'rtp_observer_protocol':1,'rtp_playout_distribution_protocol':2,'observer_sha256':info['observer_sha256'],'rtcp_patch_sha256':info['rtcp_patch_sha256'],'rtcp_arithmetic':info['rtcp_arithmetic'],'rtcp_arithmetic_sha256':info['rtcp_arithmetic_sha256']}
     dockerfile='''ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates openssl libssl3 libopus0 libasound2 libgfortran5 libquadmath0 iproute2 && rm -rf /var/lib/apt/lists/* && useradd -u 1000 -m probe
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates openssl libssl3 libopus0 libasound2 libgfortran5 libquadmath0 iproute2 traceroute libcap2-bin && rm -rf /var/lib/apt/lists/* && setcap cap_net_raw=ep /usr/bin/traceroute.db && useradd -u 1000 -m probe
 ARG SOURCE_REVISION
 ARG AGENT_VERSION
 LABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION
@@ -107,14 +109,15 @@ CMD ["python3","agent/src/main.py"]
 '''
     if args.runtime_release:
         previous=json.loads(args.runtime_release.read_text())
-        public=run(['openssl','pkey','-in',str(args.signing_key),'-pubout'])
+        public=args.runtime_public_key.read_bytes() if args.runtime_public_key else run(['openssl','pkey','-in',str(args.signing_key),'-pubout'])
+        if args.runtime_public_key and public!=args.runtime_release.with_name('signing-public.pem').read_bytes():raise ValueError('Clé publique de la release de base incohérente.')
         with tempfile.TemporaryDirectory(prefix='voiceprobe-runtime-root-') as tmp:
             pub=Path(tmp)/'public.pem';pub.write_bytes(public)
             subprocess.run(['openssl','dgst','-sha256','-verify',str(pub),'-signature',str(args.runtime_release.with_suffix('.sig')),str(args.runtime_release)],check=True,stdout=subprocess.DEVNULL)
         base_ref=previous['docker']['reference']
         base=json.loads(run(['docker','image','inspect',base_ref]))[0]
         if base['Id'] not in previous['docker']['image_ids'] or base['RootFS']['Layers']!=previous['docker']['rootfs_diff_ids'] or base['Architecture']!='amd64' or base['Config']['Labels'].get('net.wifx.project')!='voiceprobe-agent':raise ValueError('Image Agent de référence non qualifiée.')
-        dockerfile='FROM '+base_ref+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
+        dockerfile='FROM '+base_ref+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends traceroute libcap2-bin && rm -rf /var/lib/apt/lists/* && setcap cap_net_raw=ep /usr/bin/traceroute.db\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
     (context/'Dockerfile').write_text(dockerfile)
     docker=['docker','--host','unix:///var/run/docker.sock']
     if json.loads(run(docker+['info','--format','{{json .}}']))['Name']!='docker-desktop':raise ValueError('Construction exclusivement Docker Desktop Marc-Home.')
@@ -135,7 +138,7 @@ CMD ["python3","agent/src/main.py"]
     compatibility=json.loads((ROOT/'agent/installer/compatibility.json').read_text())
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
     manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
-       'version':version,'release_id':release_id,'source_revision':revision,'development':dirty,'data_schema':1,'rollback_compatible':True,
+       'version':version,'release_id':release_id,'source_revision':revision,'development':development,'data_schema':1,'rollback_compatible':True,
        'compatible_from':['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020',version],'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
@@ -157,13 +160,13 @@ CMD ["python3","agent/src/main.py"]
     (out/'install.sh').write_text(bootstrap)
     files=[p for p in out.iterdir() if p.is_file() and not p.name.endswith('.log')]
     (out/'SHA256SUMS').write_text(''.join(sha(p)+'  '+p.name+'\n' for p in sorted(files)))
-    print(json.dumps({'release_id':release_id,'source_revision':revision,'development':dirty,'output':str(out),'image':ref,'sha256':sha(out/'release.json')}))
+    print(json.dumps({'release_id':release_id,'source_revision':revision,'development':development,'output':str(out),'image':ref,'sha256':sha(out/'release.json')}))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--runtime-public-key',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
     from storage_maintenance import guard
-    # Reusing the signed runtime produces an application layer and a compressed
-    # image archive; the qualified 0.9-020 run stayed well below 5 GiB growth.
-    guard(5 if a.runtime_release else 8)
+    # The measured 0.9-021 incremental distribution is 750 MiB on disk.
+    # Reserve 2 GiB for its build context, temporary image tar and archive.
+    guard(2 if a.runtime_release else 8)
     try:pack(a)
     except (ValueError,subprocess.CalledProcessError):raise SystemExit('Construction de distribution Agent refusée ; aucun upload effectué.') from None

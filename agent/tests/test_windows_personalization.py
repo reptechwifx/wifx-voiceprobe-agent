@@ -149,6 +149,17 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(result['artifact_sha256'],hashlib.sha256((self.root/'output/WIFX-VoiceProbe.exe').read_bytes()).hexdigest())
         with self.assertRaises(worker.WorkerError): self.run_worker()
 
+    def test_023_signed_job_uses_the_pinned_template(self):
+        provision=json.loads(base64.b64decode(self.job['provisioning']['payload']))
+        provision['agent_version']='0.9-023'
+        raw=package.canonical(provision)
+        self.job['provisioning']['payload']=base64.b64encode(raw).decode()
+        self.job['provisioning']['signature']=base64.b64encode(self.key.sign(raw,padding.PKCS1v15(),hashes.SHA256())).decode()
+        self.catalog['templates']['lab-test']['agent_version']='0.9-023'
+        result=self.run_worker()
+        self.assertEqual(result['template_sha256'],self.digest)
+        self.assertEqual(result['status'],'VERIFIED_ARTIFACT')
+
     def test_production_unsigned_refused_before_output(self):
         self.job['mode']='production'
         with self.assertRaisesRegex(worker.WorkerError,'SIGNING_NOT_CONFIGURED'):self.run_worker()

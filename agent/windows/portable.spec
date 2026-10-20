@@ -6,14 +6,14 @@ root = Path(SPECPATH).parent.parent
 sdk = Path(os.environ['VOICEPROBE_WINDOWS_SDK'])
 trust = Path(os.environ['VOICEPROBE_WINDOWS_TRUST'])
 qa = os.environ.get('VOICEPROBE_WINDOWS_CONSOLE') == '1'
-data = [(str(root/'agent/VERSION'), '.'), (str(root/'agent/windows/assets'), 'assets'), (str(trust/'provisioning-public.pem'), '.'), (str(trust/'build-trust.json'), '.')]
+data = [(str(root/'agent/windows/release/VERSION'), '.'), (str(root/'agent/windows/assets'), 'assets'), (str(trust/'provisioning-public.pem'), '.'), (str(trust/'build-trust.json'), '.')]
 if (trust/'lab-ca.crt').is_file():
     data.append((str(trust/'lab-ca.crt'), '.'))
 a = Analysis([str(root/'agent/windows/portable-entry.py')],
     pathex=[str(root/'agent/src'), str(root/'agent/windows'), str(sdk)],
     binaries=[(str(p), '.') for p in sorted(sdk.glob('*.dll'))] + [(str(p), '.') for p in sdk.glob('_pjsua2*.pyd')],
     datas=data,
-    hiddenimports=['pjsua2', '_pjsua2', 'portable_agent', 'portable_runtime', 'portable_gui', 'portable_package', 'windows_identity', 'portable_memory', 'numpy', 'cryptography', 'psutil'],
+    hiddenimports=['pjsua2', '_pjsua2', 'portable_agent', 'portable_runtime', 'portable_gui', 'portable_package', 'windows_identity', 'windows_autostart', 'portable_memory', 'windows_icmp_diagnostics', 'numpy', 'cryptography', 'psutil'],
     excludes=['gateway', 'tkinter', 'unittest', 'pip', 'setuptools'],
     noarchive=False)
 pyz = PYZ(a.pure)

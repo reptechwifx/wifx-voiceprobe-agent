@@ -328,6 +328,10 @@ def run_window(status_provider, request_stop, worker_done, *, smoke_seconds=None
             state['tip'] = tip
         if smoke_seconds is not None and time.monotonic()-state['started'] >= smoke_seconds:
             begin_close(hwnd, confirm=False)
+        # A confirmed intervention end stops the SIP worker without a GUI
+        # click. Close its window as well; keep startup errors visible.
+        if worker_done.is_set() and not state['closing'] and view.get('application') != 'ERREUR':
+            begin_close(hwnd, confirm=False)
         if state['closing'] and worker_done.is_set():
             user.DestroyWindow(hwnd)
 

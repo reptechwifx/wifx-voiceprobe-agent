@@ -10,7 +10,8 @@ services:
     read_only: true
     user: "1000:1000"
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    cap_add: [NET_RAW]
+    security_opt: [no-new-privileges:false]
     environment:
       CONFIG_FILE: /var/lib/voiceprobe/config.json
     volumes:

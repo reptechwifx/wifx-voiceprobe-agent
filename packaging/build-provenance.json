@@ -1,19 +1,16 @@
 {
-  "agent_version": "0.9-021",
+  "agent_version": "0.9-013",
   "installer_version": "1.0.2",
-  "release_source_revision": "97a012229c7aed0ba090646ce9097d25ecbb8b91",
+  "release_source_revision": "31454beb13b91421bcfdd0f958f04f84d2ec0e94",
   "rtp_observer_protocol": 1,
   "distribution_protocol": 2,
-  "observer_sha256": "06cbd979f439550d2ef05f0407194e49143aae72610c1cf3cd255023923c14cf",
+  "observer_sha256": "e21e5441ea880fd5521a39b840438242ac0ad5385ae32e9bf713c48877134efc",
   "runtime_sdk_sha256": {
-    "ubuntu-24.04-amd64-cp312": "e243382e5d9a04969cbe6baca01eda7eebd7d29a26d5fbc91d24b905001ce8b4",
-    "debian-12-amd64-cp311": "e16e5c4b5f1f7048e632c9ac4b03fd8e5bbd08b7f717aecf5a27f7b0dfb544f9"
+    "ubuntu-24.04-amd64-cp312": "f31a7ae1572dcc7960110437d6b283a0f14dc60f19e0785c430d0a629f642516",
+    "debian-12-amd64-cp311": "9158f4b4ef5d48f86f8d40830a56030fbdaac08dc3ed362f30f7e123b3f7c0d7"
   },
   "quality_scope": "Receiver-erasure telemetry only; MOS G711 reference model is calculated by Controller013, not an actual WSOLA calibration. G722 MOS unqualified.",
-  "publication_status": "signed-beta-release",
-  "qualification": "docs/qualification-0.9-021.md",
-  "new_windows_binary": false,
-  "rtcp_arithmetic": "vp-rtcp-safe-v1",
-  "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c",
-  "rtcp_patch_sha256": "8a7ccd2dcafc2fc29c7b4d1a0af8692a4302b4beefbbd2d2ff7a74f36b06fc31"
+  "publication_status": "qualified",
+  "qualification": "docs/qualification-0.9-013.md",
+  "new_windows_binary": false
 }

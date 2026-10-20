@@ -7,6 +7,7 @@ import json
 import tempfile
 import threading
 import time
+import sys
 
 import certifi
 import requests
@@ -35,6 +36,8 @@ class PortableAgent(Agent):
     def __init__(self, provision, *, ca_file=None):
         self.provision = copy.deepcopy(provision)
         self.persistent = provision.get('mode') == 'persistent'
+        self._autostart_ready = False
+        self._autostart_retry_at = 0
         self._admission_secret = None
         if self.persistent:
             from windows_identity import PersistentIdentity
@@ -112,6 +115,27 @@ class PortableAgent(Agent):
     def database_location(self):
         return ':memory:'
 
+    def _install_autostart(self):
+        if not self.persistent or os.name != 'nt' or self._autostart_ready or time.monotonic() < self._autostart_retry_at:
+            return
+        try:
+            from windows_autostart import install
+            install(self.identity.instance_id, sys.executable)
+            self._autostart_ready = True
+        except (OSError, ValueError) as error:
+            self.last_error = 'Démarrage automatique Windows indisponible : ' + type(error).__name__
+            self._autostart_retry_at = time.monotonic() + 60
+
+    def _confirmed_intervention_end(self):
+        if self.persistent and os.name == 'nt':
+            try:
+                from windows_autostart import remove
+                remove(self.identity.instance_id)
+            except (OSError, ValueError) as error:
+                self.last_error = 'Suppression du démarrage automatique impossible : ' + type(error).__name__
+            self._autostart_ready = False
+        self.request_stop()
+
     def persist_config(self):
         # Neither admission tokens nor Controller/SIP credentials touch disk.
         return
@@ -166,6 +190,10 @@ class PortableAgent(Agent):
                 ack['instance_id'] = self.provision['instance_id']
             self.identity.exchange(self.cfg, ack, session=self._http_session())
             self.cfg.pop('credential_ack_pending', None)
+        if state in ('rejected', 'revoked', 'expired') or result.get('portable', {}).get('state') in ('revoked', 'expired'):
+            self._confirmed_intervention_end()
+        elif state == 'adopted' and self.cfg.get('token'):
+            self._install_autostart()
         return state == 'adopted' and bool(self.cfg.get('token'))
 
     def api(self, method, path, **kwargs):
@@ -177,14 +205,18 @@ class PortableAgent(Agent):
             verify=self.cfg['ca_file'], timeout=5, allow_redirects=False, **kwargs)
         if response.status_code in (401, 403):
             denied_state = 'revoked'
+            confirmed_end = False
             try:
                 body = response.json() if len(response.content) <= 65536 else {}
                 if isinstance(body, dict) and body.get('portable_state') in ('pending', 'expired', 'revoked'):
                     denied_state = body['portable_state']
+                    confirmed_end = denied_state in ('expired', 'revoked')
             except (ValueError, TypeError):
                 pass
             self.lease.deny(denied_state)
             self.inbox.put(('revoked', None))
+            if confirmed_end:
+                self._confirmed_intervention_end()
             response.raise_for_status()
         if 300 <= response.status_code < 400:
             raise PortableError('Redirection WIFX refusée.')
@@ -204,7 +236,10 @@ class PortableAgent(Agent):
                     try:
                         response = self.api('GET', 'portable/lease')
                         response.raise_for_status()
-                        self.lease.apply(response.json(), request)
+                        authorization = response.json()
+                        self.lease.apply(authorization, request)
+                        if authorization.get('state') in ('revoked', 'expired'):
+                            self._confirmed_intervention_end()
                     except (requests.RequestException, ValueError, KeyError, OSError):
                         pass
                 for _ in range(20):

@@ -52,7 +52,7 @@ def main():
                         str(root/'agent/windows/portable.spec')], env=env, check=True)
     if source_manifest() != source_hashes:
         raise ValueError('Sources modifiées pendant la construction ; candidat non qualifiable.')
-    receipt = {'trust': {'provisioning_spki_sha256': spki, 'lab_controller_url': policy['controller_url']}, 'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
+    receipt = {'trust': {'provisioning_spki_sha256': spki, 'lab_controller_url': policy['controller_url']}, 'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'agent_version': (root/'agent/windows/release/VERSION').read_text().strip(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
     for f in sorted(args.output.glob('*.exe')):
         receipt['artifacts'].append({'file': f.name, 'bytes': f.stat().st_size,
                                     'sha256': hashlib.sha256(f.read_bytes()).hexdigest()})

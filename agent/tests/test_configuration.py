@@ -1,7 +1,7 @@
 """Regression: administrative/identical saves must keep established SIP accounts."""
 
-import copy, importlib.util, pathlib, sys, tempfile, threading, types, unittest
-from unittest.mock import patch
+import copy, importlib.util, pathlib, sys, tempfile, threading, time, types, unittest
+from unittest.mock import patch, Mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -52,6 +52,8 @@ sdk = types.SimpleNamespace(
     AuthCredInfo=lambda *args: args,
     PJSUA_INVALID_ID=-1,
     Error=RuntimeError,
+    pj_qos_params=lambda: types.SimpleNamespace(),
+    PJ_QOS_PARAM_HAS_DSCP=1,
 )
 with patch.dict(sys.modules, {"pjsua2": sdk, "websockets": types.SimpleNamespace()}):
     spec = importlib.util.spec_from_file_location(
@@ -62,6 +64,51 @@ with patch.dict(sys.modules, {"pjsua2": sdk, "websockets": types.SimpleNamespace
 
 
 class ConfigurationTest(unittest.TestCase):
+    def test_qualified_audio_gap_starts_an_explicit_post_call_icmp_probe(self):
+        call = main.ProbeCall.__new__(main.ProbeCall)
+        call.closing_at = time.monotonic() - 1
+        call.started, call.ended = 1.0, 31.0
+        call.player = call.recorder = None
+        call.stats = {}
+        call.recording = types.SimpleNamespace(exists=lambda: True)
+        call.agent = types.SimpleNamespace(echo_tone="tone")
+        call.scenario_type = "echo"
+        call.dtmf_frame = None
+        call.dtmf_expected = False
+        call.incoming = None
+        call.network_peer = "192.0.2.10"
+        call.network_started = {"udp"}
+        call.audio_report = None
+        call.audio_report_analyzed = False
+        call.events = []
+        call._start_network_diagnostic = Mock()
+        call.completed_network_diagnostics = Mock(return_value=None)
+        with patch.object(main, "analyze_echo", return_value={"analyzed_s": 20, "interrupted_s": 2}):
+            self.assertFalse(call.report())
+        call._start_network_diagnostic.assert_called_once_with("icmp", phase="after_call")
+        self.assertTrue(call.audio_report_analyzed)
+
+    def test_network_icmp_uses_qualified_rtp_loss_not_decoder_erasures(self):
+        call = main.ProbeCall.__new__(main.ProbeCall)
+        call.started = 1.0
+        call.finished = False
+        call.dtmf_started_at = 1.0
+        call.dtmf_frame = "numeric-v2"
+        call.dtmf_expected = None
+        call.audio_phase_started = True
+        call.network_peer = None
+        call.network_started = set()
+        call._start_network_diagnostic = Mock(side_effect=lambda method: call.network_started.add(method))
+        call.stats = {"observed_rtp_source": "192.0.2.10:4000", "rx": {
+            "audio_phase_rtp": {"valid": True, "received": 1000, "lost": 0},
+            "audio_phase": {"playout": {"valid": True, "received": 970, "lost": 30}},
+        }}
+        call.diagnostics_tick()
+        self.assertEqual(call.network_started, {"udp"})
+        call.stats["rx"]["audio_phase_rtp"]["lost"] = 20
+        call.diagnostics_tick()
+        self.assertEqual(call.network_started, {"udp", "icmp"})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.a = main.Agent.__new__(main.Agent)

@@ -11,6 +11,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 @unittest.skipUnless(os.name == 'nt', 'Exécution Windows réelle requise')
 class PortableWindowTest(unittest.TestCase):
+    def test_worker_completion_closes_window_without_user_action(self):
+        from portable_gui import run_window
+        completed = threading.Event()
+        stopped = threading.Event()
+        events = []
+        view = {'application': 'ACTIF', 'adoption': 'PÉRIODE EXPIRÉE',
+                'active_tests': 0, 'version': '0.9-024'}
+
+        def complete():
+            time.sleep(.5)
+            completed.set()
+
+        worker = threading.Thread(target=complete)
+        worker.start()
+        started = time.monotonic()
+        try:
+            run_window(lambda: view, stopped.set, completed, smoke_seconds=5, lab=True,
+                       _event_observer=lambda name, details: events.append(name))
+        finally:
+            worker.join(2)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertTrue(stopped.is_set())
+        self.assertIn('tray_removed', events)
+
     def test_official_icons_minimize_tray_restore_read_only_and_confirmed_exit(self):
         import ctypes
         from ctypes import wintypes as w

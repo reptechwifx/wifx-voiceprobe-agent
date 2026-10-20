@@ -21,6 +21,13 @@ PRIVATE_BEGIN = re.compile(rb'-----BEGIN ((?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?
 PRIVATE_PEM = re.compile(rb'-----BEGIN ((?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----\r?\n(?:[ -~]*\r?\n)*?-----END \1-----')
 SECRET_FIELD = re.compile(r'password|passwd|secret|token|private.?key|credential', re.I)
 PRIVATE_HOME = re.compile(rb'/hom[e]/[^/\x00\r\n ]+/|[A-Za-z]:\\User[s]\\[^\\\x00\r\n]+\\|\\+wsl[.]localhost\\+[^\\\x00\r\n]+\\+hom[e]\\+[^\\\x00\r\n]+\\+', re.I)
+# These literals are upstream wheel build paths or examples, verified in the
+# pinned NumPy/cryptography wheels. Keep rejecting every other private path.
+UPSTREAM_PATHS = {
+    'numpy.__config__': (b'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\build-env-',),
+    'numpy.lib._datasource': (b'/home/guido/', b'/home/user/'),
+    'cryptography/hazmat/bindings/_rust.pyd': (b'C:\\Users\\runneradmin\\.cargo\\registry\\src\\',),
+}
 FORBIDDEN_COMPONENTS = {'controller', 'gateway', 'gateway.py', 'gateway.pyc', 'artisan', 'laravel', 'pip', 'ensurepip', 'setuptools', '_distutils_hack', 'distutils', 'pyinstaller', '_pyinstaller_hooks_contrib', 'wheel'}
 FORBIDDEN_FILES = {'admin.json', 'accounts-private.json', 'config.json', '.env', 'provisioning.json', 'provisioning.sig', 'voiceprobe-provisioning.json', 'voiceprobe-provisioning.sig', 'swig.exe', 'gcc.exe', 'g++.exe', 'make.exe', 'cmake.exe', 'cl.exe', 'msbuild.exe'}
 MAX_MEMBER = 256 * 1024 * 1024
@@ -140,7 +147,11 @@ class Scanner:
         for index, encoding, needle in self.needles:
             if needle in raw:
                 self.issues.append({'member': name, 'condition': 'private_fixture_value', 'secret_index': index, 'encoding': encoding})
-        if PRIVATE_HOME.search(raw) or PRIVATE_HOME.search(raw.replace(b'\0', b'')):
+        allowed_paths = UPSTREAM_PATHS.get(name, ())
+        def private_path_found(data):
+            return any(not any(data[match.start():].startswith(prefix) for prefix in allowed_paths)
+                       for match in PRIVATE_HOME.finditer(data))
+        if private_path_found(raw) or private_path_found(raw.replace(b'\0', b'')):
             self.issues.append({'member': name, 'condition': 'private_development_path'})
         if name.lower().endswith('.zip') or raw.startswith(b'PK\x03\x04'):
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:

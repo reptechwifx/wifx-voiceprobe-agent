@@ -169,5 +169,30 @@ class PersistentEngineHooksTest(unittest.TestCase):
                 self.assertEqual(expected,agent._media_evidence)
         self.assertEqual(len(cases),agent.completed_tests)
 
+    def test_windows_startup_is_installed_only_after_adoption_and_not_removed_on_disconnect(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        agent=self.portable.PortableAgent.__new__(self.portable.PortableAgent)
+        agent.persistent=True;agent.identity=SimpleNamespace(instance_id=INSTANCE)
+        agent._autostart_ready=False;agent._autostart_retry_at=0
+        agent.running=True;agent.last_error=None
+        with patch.object(self.portable.os,'name','nt'), patch.object(self.portable.sys,'executable',r'C:\Users\Test\Downloads\Voice Probe.exe'), \
+                patch('windows_autostart.install') as install, patch('windows_autostart.remove') as remove, \
+                patch.object(agent,'request_stop') as stop:
+            agent._install_autostart()
+            agent._install_autostart()
+            install.assert_called_once_with(INSTANCE,r'C:\Users\Test\Downloads\Voice Probe.exe')
+            remove.assert_not_called();stop.assert_not_called()
+            agent._confirmed_intervention_end()
+            remove.assert_called_once_with(INSTANCE);stop.assert_called_once()
+
+    def test_non_windows_and_ephemeral_agents_do_not_register_startup(self):
+        from unittest.mock import patch
+        agent=self.portable.PortableAgent.__new__(self.portable.PortableAgent)
+        agent.persistent=False;agent._autostart_ready=False;agent._autostart_retry_at=0
+        with patch('windows_autostart.install') as install:
+            agent._install_autostart()
+            install.assert_not_called()
+
 
 if __name__=='__main__': unittest.main()

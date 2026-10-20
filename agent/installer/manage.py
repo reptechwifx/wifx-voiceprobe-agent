@@ -315,7 +315,9 @@ class Native:
     def start(self, release):
         current=self.m.code/'current'; temporary=self.m.code/'current.new';temporary.unlink(missing_ok=True)
         temporary.symlink_to(release);os.replace(temporary,current)
-        text='''[Unit]\nDescription=WIFX Voice Probe Agent\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=simple\nUser=voiceprobe\nGroup=voiceprobe\nWorkingDirectory=CODE/current\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=CONFIG_FILE=DATA/config.json\nExecStart=CODE/current/venv/bin/python CODE/current/agent/src/main.py\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=DATA\nUMask=0077\n[Install]\nWantedBy=multi-user.target\n'''.replace('CODE',str(self.m.code)).replace('DATA',str(self.m.data))
+        network_capability=(private_json(release/'qualified-release.json').get('version')=='0.9-024')
+        security='NoNewPrivileges=false\nCapabilityBoundingSet=CAP_NET_RAW' if network_capability else 'NoNewPrivileges=true'
+        text='''[Unit]\nDescription=WIFX Voice Probe Agent\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=simple\nUser=voiceprobe\nGroup=voiceprobe\nWorkingDirectory=CODE/current\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=CONFIG_FILE=DATA/config.json\nExecStart=CODE/current/venv/bin/python CODE/current/agent/src/main.py\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nSECURITY\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=DATA\nUMask=0077\n[Install]\nWantedBy=multi-user.target\n'''.replace('CODE',str(self.m.code)).replace('DATA',str(self.m.data)).replace('SECURITY',security)
         self.unit_path.write_text(text);self.unit_path.chmod(0o644)
         command(['systemctl','daemon-reload']);command(['systemctl','enable',self.unit]);command(['systemctl','start',self.unit])
 
@@ -343,8 +345,9 @@ class Container:
             labels=item['Config'].get('Labels') or {}
             need(labels.get('net.wifx.project')=='voiceprobe-agent' and labels.get('net.wifx.instance')==self.m.args.instance,
                  'Conteneur homonyme appartenant à une installation inconnue ; aucune modification.')
+            caps=item['HostConfig'].get('CapAdd') or []
             need(item['HostConfig'].get('NetworkMode')=='host' and not item['HostConfig'].get('Privileged')
-                 and not item['HostConfig'].get('CapAdd') and not item['HostConfig'].get('PortBindings'),
+                 and caps in ([],['NET_RAW']) and not item['HostConfig'].get('PortBindings'),
                  'Mode réseau/privilèges Docker modifiés hors contrat ; aucune substitution.')
             need(all(v['Type']=='bind' and v['Destination']=='/var/lib/voiceprobe' or v['Type']=='tmpfs' and v['Destination']=='/tmp' for v in item['Mounts']),
                  'Montage Docker supplémentaire non qualifié ; aucune ressource étrangère modifiée.')
@@ -396,6 +399,12 @@ class Container:
         else:
             hostname=self.engine.call('GET','/info').get('Name','voiceprobe')
             config['Hostname']=(re.sub('[^A-Za-z0-9-]','-',hostname)+'-'+self.m.args.instance)[:63]
+        if declaration.get('network_diagnostics'):
+            host=config['HostConfig']
+            host['CapDrop']=['ALL']
+            host['CapAdd']=['NET_RAW']
+            host['SecurityOpt']=[option for option in (host.get('SecurityOpt') or [])
+                                 if not option.startswith('no-new-privileges:')]+['no-new-privileges:false']
         if 'Healthcheck' not in config:
             check="""import json,os,time,urllib.request,ssl,sys
 try:
@@ -417,12 +426,14 @@ except Exception:
         item=self.inspect()
         if not item:return None
         keys=['Env','Cmd','Entrypoint','WorkingDir','User','Labels','Hostname','Healthcheck']
-        host_keys=['Memory','MemorySwap','MemoryReservation','NanoCpus','CpuShares','CpuPeriod','CpuQuota','CpusetCpus','PidsLimit','RestartPolicy','LogConfig','ReadonlyRootfs','Init','SecurityOpt','CapDrop','Tmpfs']
+        host_keys=['Memory','MemorySwap','MemoryReservation','NanoCpus','CpuShares','CpuPeriod','CpuQuota','CpusetCpus','PidsLimit','RestartPolicy','LogConfig','ReadonlyRootfs','Init','SecurityOpt','CapDrop','CapAdd','Tmpfs']
         original_image=self.engine.call('GET','/images/'+item['Image']+'/json')
         need(original_image,'Image actuelle absente ; capture de configuration refusée.')
         defaults=set(original_image.get('Config',{}).get('Env') or [])
         item['Config']['Env']=[value for value in item['Config'].get('Env',[]) if value not in defaults]
+        labels=original_image.get('Config',{}).get('Labels') or {}
         return {'local_image_id':item['Image'],'was_running':item['State']['Running'],
+                'network_diagnostics':labels.get('org.opencontainers.image.version')=='0.9-024',
                 'config':{k:item['Config'][k] for k in keys if k in item['Config']},
                 'host':{k:item['HostConfig'][k] for k in host_keys if k in item['HostConfig']}}
 
@@ -592,7 +603,7 @@ class Manager:
                 with sqlite3.connect(str(db)) as connection:need(connection.execute('PRAGMA quick_check').fetchone()[0]=='ok','Sauvegarde SQLite non intègre.')
 
     def dependencies(self,runtime):
-        allowed={'python3','python3-venv','python3-requests','python3-websockets','python3-numpy','ca-certificates','openssl','iproute2','libssl3','libssl3t64','libopus0','libasound2','libasound2t64','libstdc++6','libgcc-s1','libgfortran5','libquadmath0'}
+        allowed={'python3','python3-venv','python3-requests','python3-websockets','python3-numpy','ca-certificates','openssl','iproute2','traceroute','libcap2-bin','libssl3','libssl3t64','libopus0','libasound2','libasound2t64','libstdc++6','libgcc-s1','libgfortran5','libquadmath0'}
         packages=runtime.get('dependencies',[])
         need(isinstance(packages,list) and packages and all(p in allowed for p in packages),'Dépendances non qualifiées ; aucun paquet arbitraire installé.')
         installed=subprocess.run(['dpkg-query','-W','-f=${db:Status-Status}\n',*packages],capture_output=True,text=True)
@@ -623,6 +634,11 @@ class Manager:
         release=self.code/'releases'/manifest['release_id']
         if release.exists():
             need((release/'qualified-release.json').is_file() and same_release(private_json(release/'qualified-release.json'),manifest),'Release existante incohérente ; aucun écrasement.')
+            if manifest['version']=='0.9-024':
+                need(((release/'bin').stat().st_mode & 0o555)==0o555,
+                     'Outil réseau de la release native inaccessible au compte Agent.')
+                need('cap_net_raw=ep' in command(['getcap',str(release/'bin/traceroute')]).decode(),
+                     'Capacité ICMP absente de la release native existante.')
             self.runtime_test(release/'venv/bin/python')
             return release
         self.dependencies(runtime)
@@ -652,6 +668,12 @@ class Manager:
             for path in [stage,*stage.rglob('*')]:
                 if not path.is_symlink():
                     path.chmod(0o755 if path.is_dir() or path.stat().st_mode&0o111 else 0o644)
+            tool=stage/'bin/traceroute';tool.parent.mkdir(mode=0o755)
+            tool.parent.chmod(0o755)
+            shutil.copy2('/usr/bin/traceroute.db',tool)
+            command(['setcap','cap_net_raw=ep',str(tool)],message='Attribution ciblée CAP_NET_RAW au traceroute Agent refusée.')
+            need('cap_net_raw=ep' in command(['getcap',str(tool)]).decode(),
+                 'Capacité ICMP du traceroute Agent non vérifiée.')
             atomic(stage/'qualified-release.json',manifest)
             shutil.move(str(stage),release)
         return release
@@ -680,7 +702,7 @@ class Manager:
         labels=image.get('Config',{}).get('Labels') or {}
         need(labels.get('net.wifx.project')=='voiceprobe-agent' and labels.get('org.opencontainers.image.version')==manifest['version']
              and labels.get('org.opencontainers.image.revision')==manifest['source_revision'], 'Identité/version de l’image Agent non conforme.')
-        return {'local_image_id':image['Id']}
+        return {'local_image_id':image['Id'],'network_diagnostics':manifest['version']=='0.9-024'}
 
     def available_rtp_base(self):
         # New installations only: avoid system services such as mDNS5353/LLMNR5355.

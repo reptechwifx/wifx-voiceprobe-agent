@@ -2,7 +2,9 @@
 """Paquet Windows LAB signé, liste fermée ; aucune publication ni clé dans le ZIP."""
 if __name__ == '__main__':
     from storage_maintenance import guard
-    guard(4)
+    # Measured LAB ZIP: 65 MiB; sources: 40 MiB; a 1 GiB reserve leaves
+    # room for the archive and verification copy under the var/ budget.
+    guard(1)
 
 # SPDX-License-Identifier: GPL-3.0-or-later
 import argparse
@@ -41,6 +43,7 @@ def package(args):
         portable_version = receipt.get('portable_version')
         artifacts = receipt.get('artifacts')
         if (receipt.get('qualification') != 'LAB_UNSIGNED_NOT_FOR_CLIENTS'
+                or receipt.get('agent_version') != proof.get('agent_version')
                 or not isinstance(portable_version, str) or len(portable_version) > 64
                 or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-lab', portable_version)
                 or not isinstance(artifacts, list) or len(artifacts) != 1 or not isinstance(artifacts[0], dict)
@@ -57,6 +60,18 @@ def package(args):
     for directory in (args.sdk, args.notices, args.sources, args.third_party_sources):
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError('Répertoire régulier requis : SDK, licences et sources correspondantes.')
+    if receipt_path is not None:
+        source_hashes = receipt.get('source_sha256')
+        if not isinstance(source_hashes, dict) or not source_hashes:
+            raise ValueError('Empreintes de sources absentes du reçu Windows.')
+        for name, expected in source_hashes.items():
+            source = args.sources/name
+            if (not isinstance(name, str) or not name.startswith('agent/') or '..' in PurePosixPath(name).parts
+                    or not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected)
+                    or not source.is_file() or source.is_symlink() or sha(source) != expected):
+                raise ValueError('Source Windows différente du binaire construit.')
+        if (args.sources/'agent/windows/release/VERSION').read_text(encoding='utf-8').strip() != receipt['agent_version']:
+            raise ValueError('Version Windows source différente du binaire construit.')
     files = {'WIFX-VoiceProbe.exe': args.exe, 'qualification/bundle-audit.json': args.audit}
     if receipt_path is not None:
         files['qualification/build-receipt.json'] = receipt_path

@@ -2,7 +2,9 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import threading
 
@@ -59,6 +61,22 @@ def load_integrated_provision(root, executable, policy):
                                expected_package_nonce=embedded['package_nonce'])
 
 
+def relocate_persistent(provision, executable):
+    """Start only the verified per-user copy, before any SIP/RTP socket exists."""
+    if os.name != 'nt' or provision.get('mode') != 'persistent':
+        return False
+    from windows_autostart import stage
+    try:
+        stable = stage(provision['instance_id'], executable)
+    except PermissionError:
+        from portable_runtime import PortableError
+        raise PortableError('Fermez la sonde Voice Probe avant d’installer sa mise à jour.') from None
+    if os.path.samefile(stable, executable):
+        return False
+    subprocess.Popen([str(stable)], cwd=str(stable.parent), close_fds=True)
+    return True
+
+
 def forget_identity(provision, ask, notify, *, identity_factory=None):
     """Forget one verified instance after explicit confirmation; no SIP/network."""
     from portable_runtime import PortableError
@@ -74,6 +92,9 @@ def forget_identity(provision, ask, notify, *, identity_factory=None):
         identity_factory = PersistentIdentity
     identity = identity_factory(provision, allow_create=False)
     try:
+        if os.name == 'nt':
+            from windows_autostart import remove
+            remove(provision['instance_id'])
         identity.forget()
     finally:
         identity.close()
@@ -124,6 +145,17 @@ def main():
         except (PortableError, PackageError) as error:
             notify('Suppression refusée', str(error))
             return 1
+    prepared_provision = None
+    bootstrap_error = None
+    if os.name == 'nt' and getattr(sys, 'frozen', False) and not args.gui_smoke:
+        try:
+            prepared_provision = load_integrated_provision(root, Path(sys.executable), policy)
+            if relocate_persistent(prepared_provision, sys.executable):
+                return 0
+        except PortableError as error:
+            bootstrap_error = str(error)
+        except Exception:
+            bootstrap_error = 'Démarrage impossible. Contactez votre technicien WIFX.'
     from portable_gui import run_window
     from portable_runtime import PortableError
     from version import VERSION
@@ -155,7 +187,9 @@ def main():
                 return
             if not getattr(sys, 'frozen', False):
                 raise PortableError('Utilisez le paquet Windows préparé par votre technicien WIFX.')
-            provision = load_integrated_provision(root, Path(sys.executable), policy)
+            if bootstrap_error:
+                raise PortableError(bootstrap_error)
+            provision = prepared_provision or load_integrated_provision(root, Path(sys.executable), policy)
             from portable_agent import PortableAgent
             ca = root / 'lab-ca.crt'
             agent = PortableAgent(provision, ca_file=str(ca) if policy['qualification'] == 'lab' and ca.is_file() and provision['controller_url'] == policy.get('controller_url') else None)
