@@ -276,6 +276,39 @@ class LocalSafety(unittest.TestCase):
         self.assertEqual([],legacy['CapAdd'])
         self.assertEqual(['no-new-privileges:true','seccomp=default'],legacy['SecurityOpt'])
 
+    def test_network_profile_is_required_for_025_and_preserves_024(self):
+        self.assertTrue(m.network_diagnostics('0.9-025'))
+        self.assertTrue(m.network_diagnostics('0.9-024'))
+        self.assertFalse(m.network_diagnostics('0.9-021'))
+
+    def test_docker_verification_requires_effective_diagnostics_not_only_cap_add(self):
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',settings={})
+        container=m.Container(manager)
+        item={'Id':'agent-id','Config':{'User':'1000:1000'},'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'CapAdd':['NET_RAW'],'SecurityOpt':['no-new-privileges:false']}}
+        container.inspect=lambda:item
+        identifier='a'*64;calls=[]
+        proof={'profile':'udp-icmp-net-raw-v1','loopback':{'udp':True,'icmp':True}}
+        raw=json.dumps(proof).encode();frame=bytes([1,0,0,0])+len(raw).to_bytes(4,'big')+raw
+        exit_code=[1];rootless=[False]
+        def api(method,path,value=None,raw=False):
+            calls.append((method,path,value))
+            if path=='/info':return {'SecurityOptions':['name=rootless'] if rootless[0] else []}
+            if path.endswith('/exec'):return {'Id':identifier}
+            if path.endswith('/start'):return frame
+            return {'ExitCode':exit_code[0],'Running':False}
+        container.engine=types.SimpleNamespace(call=api)
+        with self.assertRaisesRegex(m.Failure,'effectives'):container.verify_network_profile()
+        self.assertNotIn('network_profile_verified',manager.settings)
+        exit_code[0]=0
+        self.assertEqual(proof,container.verify_network_profile())
+        self.assertEqual('1000:1000',calls[-3][2]['User'])
+        rootless[0]=True
+        with self.assertRaisesRegex(m.Failure,'rootless'):container.verify_network_profile()
+        rootless[0]=False
+        for security,caps in [(['no-new-privileges:true'],['NET_RAW']),(['no-new-privileges:false'],[])]:
+            item['HostConfig'].update(SecurityOpt=security,CapAdd=caps)
+            with self.assertRaisesRegex(m.Failure,'non conforme'):container.verify_network_profile()
+
     def manager(self):
         manager=m.Manager.__new__(m.Manager);manager.code=self.root/'code';manager.code.mkdir();manager.data=self.root/'data';manager.data.mkdir()
         manager.cfg=manager.data/'config.json';m.atomic(manager.cfg,{'id':'test-id','local_password_hash':'known-hash'})

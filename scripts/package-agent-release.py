@@ -117,7 +117,7 @@ CMD ["python3","agent/src/main.py"]
         base_ref=previous['docker']['reference']
         base=json.loads(run(['docker','image','inspect',base_ref]))[0]
         if base['Id'] not in previous['docker']['image_ids'] or base['RootFS']['Layers']!=previous['docker']['rootfs_diff_ids'] or base['Architecture']!='amd64' or base['Config']['Labels'].get('net.wifx.project')!='voiceprobe-agent':raise ValueError('Image Agent de référence non qualifiée.')
-        dockerfile='FROM '+base_ref+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends traceroute libcap2-bin && rm -rf /var/lib/apt/lists/* && setcap cap_net_raw=ep /usr/bin/traceroute.db\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
+        dockerfile='FROM '+base_ref+'\nARG SOURCE_REVISION\nARG AGENT_VERSION\nLABEL net.wifx.project=voiceprobe-agent org.opencontainers.image.revision=$SOURCE_REVISION org.opencontainers.image.version=$AGENT_VERSION\nUSER root\nRUN test -x /usr/bin/traceroute.db && command -v setcap && setcap cap_net_raw=ep /usr/bin/traceroute.db\nCOPY . /opt/voiceprobe/\nRUN rm -rf /opt/voiceprobe/pjsip/wheels\nUSER 1000:1000\n'
     (context/'Dockerfile').write_text(dockerfile)
     docker=['docker','--host','unix:///var/run/docker.sock']
     if json.loads(run(docker+['info','--format','{{json .}}']))['Name']!='docker-desktop':raise ValueError('Construction exclusivement Docker Desktop Marc-Home.')
@@ -139,7 +139,7 @@ CMD ["python3","agent/src/main.py"]
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
     manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':development,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':list(dict.fromkeys(['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020','0.9-021',version])),'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':list(dict.fromkeys(['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020','0.9-021','0.9-024',version])),'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:

@@ -282,7 +282,7 @@ class UnixHTTP(http.client.HTTPConnection):
 
 
 class Engine:
-    def call(self, method, path, value=None, file=None):
+    def call(self, method, path, value=None, file=None, raw=False):
         connection = UnixHTTP('localhost', timeout=600)
         headers = {}
         data = None
@@ -301,12 +301,16 @@ class Engine:
                 for line in body.splitlines():
                     event=json.loads(line);need(not event.get('error') and not event.get('errorDetail'),'Chargement de l’image Docker refusé.')
                 return {}
-            return json.loads(body)
+            return body if raw else json.loads(body)
         except (OSError,http.client.HTTPException):
             raise Failure('Docker local indisponible ou opération interrompue.') from None
         finally:
             if file and data: data.close()
             connection.close()
+
+
+def network_diagnostics(version):
+    return version in ('0.9-024','0.9-025')
 
 
 class Native:
@@ -344,7 +348,7 @@ class Native:
     def start(self, release):
         current=self.m.code/'current'; temporary=self.m.code/'current.new';temporary.unlink(missing_ok=True)
         temporary.symlink_to(release);os.replace(temporary,current)
-        network_capability=(private_json(release/'qualified-release.json').get('version')=='0.9-024')
+        network_capability=network_diagnostics(private_json(release/'qualified-release.json').get('version'))
         security='NoNewPrivileges=false\nCapabilityBoundingSet=CAP_NET_RAW' if network_capability else 'NoNewPrivileges=true'
         text='''[Unit]\nDescription=WIFX Voice Probe Agent\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=simple\nUser=voiceprobe\nGroup=voiceprobe\nWorkingDirectory=CODE/current\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=CONFIG_FILE=DATA/config.json\nExecStart=CODE/current/venv/bin/python CODE/current/agent/src/main.py\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nSECURITY\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=DATA\nUMask=0077\n[Install]\nWantedBy=multi-user.target\n'''.replace('CODE',str(self.m.code)).replace('DATA',str(self.m.data)).replace('SECURITY',security)
         self.unit_path.write_text(text);self.unit_path.chmod(0o644)
@@ -462,9 +466,66 @@ except Exception:
         item['Config']['Env']=[value for value in item['Config'].get('Env',[]) if value not in defaults]
         labels=original_image.get('Config',{}).get('Labels') or {}
         return {'local_image_id':item['Image'],'was_running':item['State']['Running'],
-                'network_diagnostics':labels.get('org.opencontainers.image.version')=='0.9-024',
+                'network_diagnostics':False,
                 'config':{k:item['Config'][k] for k in keys if k in item['Config']},
                 'host':{k:item['HostConfig'][k] for k in host_keys if k in item['HostConfig']}}
+
+    def verify_network_profile(self):
+        info=self.engine.call('GET','/info') or {}
+        need(not any('rootless' in option.lower() for option in info.get('SecurityOptions',[])),
+             'Docker rootless non qualifié pour ce profil réseau ; aucune annonce de succès vérifié.')
+        item=self.inspect();host=item['HostConfig']
+        caps=[v.removeprefix('CAP_') for v in host.get('CapAdd') or []]
+        security=[v.replace('=',':') for v in host.get('SecurityOpt') or []]
+        need(item['Config'].get('User')=='1000:1000' and host.get('ReadonlyRootfs')
+             and host.get('CapDrop')==['ALL'] and caps==['NET_RAW']
+             and 'no-new-privileges:true' not in security,
+             'Profil réseau Docker non conforme : UID 1000, racine en lecture seule et seul NET_RAW requis ; succès refusé.')
+        code=r"""import json,os,re,subprocess,time
+from pathlib import Path
+assert os.geteuid()==1000
+status=dict(line.split(':',1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
+assert int(status['CapBnd'],16)==1<<13 and int(status['CapEff'],16)&~(1<<13)==0
+assert int(status['NoNewPrivs'])==0
+binary='/usr/bin/traceroute.db'
+assert 'cap_net_raw=ep' in subprocess.check_output(['getcap',binary],text=True)
+methods={};executable_caps={}
+for name,flag in [('udp','-U'),('icmp','-I')]:
+ process=subprocess.Popen([binary,flag,'-n','-q','3','-N','1','-z','0.1','-m','1','-w','1','127.0.0.1','100'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+ observed=set();deadline=time.monotonic()+5
+ while process.poll() is None and time.monotonic()<deadline:
+  try:
+   if Path('/proc/'+str(process.pid)+'/comm').read_text().strip().startswith('traceroute'):
+    child=dict(line.split(':',1) for line in Path('/proc/'+str(process.pid)+'/status').read_text().splitlines() if ':' in line)
+    observed.add(int(child['CapEff'],16))
+  except OSError:pass
+  time.sleep(.005)
+ stdout,stderr=process.communicate(timeout=1)
+ assert process.returncode==0 and re.search(r'^\s*1\s+127\.0\.0\.1\s',stdout,re.M),name
+ assert 1<<13 in observed and all(v & ~(1<<13)==0 for v in observed),(name,sorted(observed))
+ methods[name]=True
+ executable_caps[name]=sorted(observed)
+print(json.dumps({'profile':'udp-icmp-net-raw-v1','uid':1000,'bounding_set':status['CapBnd'].strip(),'effective':status['CapEff'].strip(),'executable_effective':executable_caps,'no_new_privileges':False,'file_capability':'cap_net_raw=ep','loopback':methods}))
+"""
+        execution=self.engine.call('POST','/containers/'+item['Id']+'/exec',
+                                   {'AttachStdout':True,'AttachStderr':True,'User':'1000:1000','Cmd':['python3','-c',code]})
+        need(execution and re.fullmatch('[a-f0-9]{64}',execution.get('Id','')),'Contrôle des permissions Docker indisponible.')
+        output=self.engine.call('POST','/exec/'+execution['Id']+'/start',{'Detach':False,'Tty':False},raw=True)
+        state=self.engine.call('GET','/exec/'+execution['Id']+'/json')
+        need(state and state.get('ExitCode')==0 and not state.get('Running'),
+             'Permissions effectives UDP/ICMP refusées sous UID 1000 ; contrôler NET_RAW, le binaire et no-new-privileges. Aucun succès vérifié.')
+        payload=b'';offset=0
+        while offset<len(output):
+            need(len(output)-offset>=8,'Réponse de contrôle Docker tronquée.')
+            size=int.from_bytes(output[offset+4:offset+8],'big');offset+=8
+            need(size<=len(output)-offset,'Réponse de contrôle Docker tronquée.')
+            payload+=output[offset:offset+size];offset+=size
+        try:proof=json.loads(payload)
+        except (ValueError,UnicodeError):raise Failure('Preuve des permissions Docker invalide.') from None
+        need(proof.get('profile')=='udp-icmp-net-raw-v1' and proof.get('loopback')=={'udp':True,'icmp':True},
+             'Diagnostics locaux Docker non vérifiés.')
+        self.m.settings['network_profile_verified']=proof
+        return proof
 
     def restore(self, previous):
         self.stop();self.start(previous,start=previous.get('was_running',True))
@@ -716,6 +777,8 @@ class Manager:
         declaration=manifest['docker'];engine=self.backend.engine
         info=engine.call('GET','/info');need(info and info.get('OSType')=='linux' and info.get('Architecture') in ('x86_64','amd64'),
                                                 'Moteur Docker Linux AMD64 requis.')
+        need(not any('rootless' in option.lower() for option in info.get('SecurityOptions',[])),
+             'Docker rootless non qualifié pour ce profil réseau ; installation inchangée.')
         image=engine.call('GET','/images/'+urllib.parse.quote(declaration['reference'],safe='')+'/json')
         if image is None:
             # Refuse archives that could load another project or a second image.
@@ -731,7 +794,7 @@ class Manager:
         labels=image.get('Config',{}).get('Labels') or {}
         need(labels.get('net.wifx.project')=='voiceprobe-agent' and labels.get('org.opencontainers.image.version')==manifest['version']
              and labels.get('org.opencontainers.image.revision')==manifest['source_revision'], 'Identité/version de l’image Agent non conforme.')
-        return {'local_image_id':image['Id'],'network_diagnostics':manifest['version']=='0.9-024'}
+        return {'local_image_id':image['Id'],'network_diagnostics':network_diagnostics(manifest['version'])}
 
     def available_rtp_base(self):
         # New installations only: avoid system services such as mDNS5353/LLMNR5355.
@@ -833,7 +896,9 @@ m.atomic_json(p,c)
                     host=previous_cfg.get('bind','127.0.0.1');scheme='https' if previous_cfg.get('tls_cert') else 'http'
                     connection=http.client.HTTPSConnection(host,previous_cfg.get('port',18441),context=ssl.create_default_context(cafile=self.data_path(previous_cfg['tls_cert'])),timeout=3) if scheme=='https' else http.client.HTTPConnection(host,previous_cfg.get('port',18441),timeout=3)
                     connection.request('GET','/login');response=connection.getresponse();response.read();connection.close()
-                    if response.status==200:return status
+                    if response.status==200:
+                        if self.args.backend=='docker' and network_diagnostics(manifest['version']):self.backend.verify_network_profile()
+                        return status
                 except (OSError,ssl.SSLError):pass
             time.sleep(1)
         details=[]
