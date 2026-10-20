@@ -70,14 +70,14 @@ def pack(args):
                     with path.open('rb') as source_file:archive.addfile(item,source_file)
                 else:archive.addfile(item)
     runtimes={}
-    for platform_key in ['ubuntu-24.04-amd64-cp312','debian-12-amd64-cp311']:
+    for platform_key in ['ubuntu-24.04-amd64-cp312','debian-12-amd64-cp311', *args.additional_platform]:
         binary=args.binaries/(platform_key+'-offline.tar.gz')
         with tarfile.open(binary) as archive:
             info=json.load(archive.extractfile('pjsip/binary.json'))
             if info['platform']!=platform_key or info['pjsip_version']!='2.16' or info['source_sha256']!=PJSIP_SOURCE_SHA256:raise ValueError('Provenance binaire PJSIP incompatible.')
             if info.get('rtp_observer_protocol') != 1 or info.get('rtp_playout_distribution_protocol') != 2 or info.get('observer_sha256') != sha(ROOT/'agent/installer/rtp-observer.h'):raise ValueError('Observer RTP absent ou non conforme au code livré.')
             if info.get('rtcp_patch_sha256') != sha(ROOT/'scripts/instrument-pjsip.py') or info.get('rtcp_arithmetic') != 'vp-rtcp-safe-v1' or info.get('rtcp_arithmetic_sha256') != sha(ROOT/'agent/installer/rtcp-safe.h'):raise ValueError('Correctif arithmétique RTCP absent ou non conforme.')
-            if platform_key.startswith('debian'):
+            if platform_key=='debian-12-amd64-cp311':
                 target=context/'pjsip';target.mkdir()
                 for member in archive:
                     relative=Path(member.name).relative_to('pjsip')
@@ -86,8 +86,9 @@ def pack(args):
                     destination=target/relative;destination.parent.mkdir(parents=True,exist_ok=True);destination.write_bytes(archive.extractfile(member).read())
         binary_name=platform_key+'-'+sha(binary)[:12]+'.tar.gz'
         shutil.copy2(binary,out/binary_name)
-        dependencies=['python3','python3-venv','ca-certificates','openssl','iproute2','traceroute','libcap2-bin','libopus0','libstdc++6','libgcc-s1','libgfortran5','libquadmath0']
-        dependencies+=['libssl3t64','libasound2t64'] if platform_key.startswith('ubuntu') else ['libssl3','libasound2']
+        dependencies=['python3','python3-venv','ca-certificates','openssl','iproute2','traceroute','libcap2-bin','libopus0','libstdc++6','libgcc-s1','libgfortran5']
+        if platform_key!='debian-13-arm64-cp313':dependencies+=['libquadmath0']
+        dependencies+=['libssl3t64','libasound2t64'] if platform_key.startswith('ubuntu') or platform_key=='debian-13-arm64-cp313' else ['libssl3','libasound2']
         runtimes[platform_key]={**artifact(out/binary_name),'python':info['python'],'soabi':info['soabi'],'glibc':info['glibc'],'dependencies':dependencies,'rtp_observer_protocol':1,'rtp_playout_distribution_protocol':2,'observer_sha256':info['observer_sha256'],'rtcp_patch_sha256':info['rtcp_patch_sha256'],'rtcp_arithmetic':info['rtcp_arithmetic'],'rtcp_arithmetic_sha256':info['rtcp_arithmetic_sha256']}
     dockerfile='''ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
@@ -139,7 +140,7 @@ CMD ["python3","agent/src/main.py"]
     manager_name='agent-manager-'+sha(ROOT/'agent/installer/manage.py')[:12]+'.py'
     manifest={'schema':1,'installer_protocol':1,'installer_version':'1.0.2','sequence':args.sequence,'expires':int(time.time())+90*86400,
        'version':version,'release_id':release_id,'source_revision':revision,'development':development,'data_schema':1,'rollback_compatible':True,
-       'compatible_from':list(dict.fromkeys(['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020','0.9-021','0.9-024',version])),'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
+       'compatible_from':list(dict.fromkeys(['0.9-003','0.9-004','0.9-007','0.9-008','0.9-009','0.9-012','0.9-013','0.9-017','0.9-019','0.9-020','0.9-021','0.9-024','0.9-025',version])),'legacy_main_sha256':compatibility['legacy_native_main_sha256'],
        'manager':{**artifact(ROOT/'agent/installer/manage.py'),'name':manager_name},'agent':artifact(app),'runtimes':runtimes,'docker':{**artifact(docker_archive),'reference':ref,'image_ids':list(dict.fromkeys([image['Id'],config_id])),
        'rootfs_diff_ids':image['RootFS']['Layers']}}
     if args.artifact_source:
@@ -166,7 +167,7 @@ CMD ["python3","agent/src/main.py"]
     print(json.dumps({'release_id':release_id,'source_revision':revision,'development':development,'output':str(out),'image':ref,'sha256':sha(out/'release.json')}))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--runtime-public-key',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);p.add_argument('--binaries',required=True,type=Path);p.add_argument('--source',required=True);p.add_argument('--signing-key',required=True,type=Path);p.add_argument('--sequence',type=int,required=True);p.add_argument('--debian-base',default='debian:bookworm-slim');p.add_argument('--additional-platform',action='append',default=[],choices=['debian-13-arm64-cp313']);p.add_argument('--artifact-source');p.add_argument('--notices',type=Path);p.add_argument('--corresponding-sources',type=Path,nargs='*');p.add_argument('--runtime-release',type=Path);p.add_argument('--runtime-public-key',type=Path);p.add_argument('--lab-development',action='store_true');a=p.parse_args()
     from storage_maintenance import guard
     # The measured 0.9-021 incremental distribution is 750 MiB on disk.
     # Reserve 2 GiB for its build context, temporary image tar and archive.

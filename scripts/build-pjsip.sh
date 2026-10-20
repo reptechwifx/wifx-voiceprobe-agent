@@ -22,7 +22,12 @@ if [ ! -f "$BUILD_SCRIPT_DIRECTORY/rtp-observer.h" ]; then
 fi
 "$PYTHON_EXEC" "$BUILD_SCRIPT_DIRECTORY/instrument-pjsip.py" "$PWD" "${VOICEPROBE_OBSERVER_HEADER:-$BUILD_SCRIPT_DIRECTORY/rtp-observer.h}"
 printf '#define PJSUA_MAX_CALLS 128\n#define PJSUA_MAX_ACC 32\n#define PJSUA_MAX_CONF_PORTS 512\n' > pjlib/include/pj/config_site.h
-./configure --prefix="$PJSIP_PREFIX" CFLAGS='-fPIC -O2 -march=x86-64 -mtune=generic' CXXFLAGS='-fPIC -O2 -march=x86-64 -mtune=generic' --disable-video --disable-sound --disable-libyuv --disable-ffmpeg --disable-v4l2 --disable-openh264
+case "$(uname -m)" in
+ x86_64|amd64) architecture_flags='-fPIC -O2 -march=x86-64 -mtune=generic';;
+ aarch64|arm64) architecture_flags='-fPIC -O2 -march=armv8-a -mtune=generic';;
+ *) printf 'Architecture de construction non qualifiée.\n' >&2; exit 1;;
+esac
+./configure --prefix="$PJSIP_PREFIX" CFLAGS="$architecture_flags" CXXFLAGS="$architecture_flags" --disable-video --disable-sound --disable-libyuv --disable-ffmpeg --disable-v4l2 --disable-openh264
 make dep
 make -j"${VOICEPROBE_BUILD_JOBS:-2}"
 make install

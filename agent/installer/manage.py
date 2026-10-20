@@ -310,7 +310,7 @@ class Engine:
 
 
 def network_diagnostics(version):
-    return version in ('0.9-024','0.9-025')
+    return version in ('0.9-024','0.9-025','0.9-026')
 
 
 class Native:
@@ -535,7 +535,8 @@ class Manager:
     def __init__(self,args):
         self.args=args;self.stage='initialisation';self.password=None;self.frozen=None;self.previous=None
         need(os.geteuid()==0,'Exécuter avec sudo ou le compte SSH autorisé root.')
-        need(platform.machine() in ('x86_64','amd64'),'Architecture non qualifiée : AMD64 requis ; aucune compilation automatique.')
+        need(platform.machine() in ('x86_64','amd64','aarch64','arm64'),'Architecture non qualifiée : Linux 64 bits requis ; aucune compilation automatique.')
+        need(args.backend!='docker' or platform.machine() in ('x86_64','amd64'),'Docker ARM64 non qualifié ; utiliser Debian13 ARM64 natif.')
         need(re.fullmatch('[a-z][a-z0-9-]{0,31}',args.instance),'Nom d’instance invalide.')
         if args.backend=='native':
             need(args.instance=='default','Instances natives multiples non qualifiées ; utiliser les instances Docker distinctes.')
@@ -569,9 +570,16 @@ class Manager:
 
     def platform_key(self):
         info=platform.freedesktop_os_release();version='.'.join(map(str,sys.version_info[:2]));abi=sys.implementation.cache_tag
-        allowed={('ubuntu','24.04','3.12'): 'ubuntu-24.04-amd64-cp312',('debian','12','3.11'):'debian-12-amd64-cp311'}
-        key=allowed.get((info.get('ID'),info.get('VERSION_ID'),version))
-        need(key,'OS/version Python non qualifiés : Ubuntu24.04/Python3.12 ou Debian12/Python3.11 AMD64 requis. Aucun fallback source/ARM64.')
+        cpu=platform.machine();userspace=command(['dpkg','--print-architecture'],message='Architecture userspace Debian indéterminée.').decode().strip()
+        with Path('/proc/self/exe').open('rb') as stream:executable=stream.read(20)
+        machine=int.from_bytes(executable[18:20],'little')
+        need(executable[:4]==b'\x7fELF' and executable[4:6]==b'\x02\x01' and sys.maxsize>2**32,
+             'Python/userspace 64 bits little-endian requis ; armhf refusé.')
+        architecture='arm64' if cpu in ('aarch64','arm64') and userspace=='arm64' and machine==183 else 'amd64' if cpu in ('x86_64','amd64') and userspace=='amd64' and machine==62 else None
+        need(architecture,'CPU, userspace et binaire Python incohérents ; aucun binaire étranger installé.')
+        allowed={('ubuntu','24.04','3.12','amd64'):'ubuntu-24.04-amd64-cp312',('debian','12','3.11','amd64'):'debian-12-amd64-cp311',('debian','13','3.13','arm64'):'debian-13-arm64-cp313'}
+        key=allowed.get((info.get('ID'),info.get('VERSION_ID'),version,architecture))
+        need(key,'Plateforme non qualifiée : Debian13/Python3.13 ARM64, Debian12/Python3.11 AMD64 ou Ubuntu24.04/Python3.12 AMD64 requis.')
         need(Path('/run/systemd/system').is_dir() and shutil.which('systemctl'),'systemd natif actif requis ; choisir le mode Docker sur DSM.')
         return key
 
@@ -724,7 +732,7 @@ class Manager:
         release=self.code/'releases'/manifest['release_id']
         if release.exists():
             need((release/'qualified-release.json').is_file() and same_release(private_json(release/'qualified-release.json'),manifest),'Release existante incohérente ; aucun écrasement.')
-            if manifest['version']=='0.9-024':
+            if network_diagnostics(manifest['version']):
                 need(((release/'bin').stat().st_mode & 0o555)==0o555,
                      'Outil réseau de la release native inaccessible au compte Agent.')
                 need('cap_net_raw=ep' in command(['getcap',str(release/'bin/traceroute')]).decode(),
@@ -750,8 +758,15 @@ class Manager:
                 need(wheels.is_dir() and (binary/'requirements.lock').is_file(),'Dépendances Python binaires qualifiées absentes ; aucune compilation.')
                 command([str(stage/'venv/bin/python'),'-m','pip','--isolated','install','--no-compile','--no-index','--only-binary',':all:','--require-hashes','--find-links',str(wheels),'-r',str(binary/'requirements.lock')],timeout=180,message='Installation hors ligne des dépendances Python binaires refusée.')
                 site=Path(command([str(stage/'venv/bin/python'),'-c','import sysconfig; print(sysconfig.get_path("purelib"))']).decode().strip())
+                need(all(info.get(field)==manifest['runtimes'][info['platform']].get(field) for field in ('observer_sha256','rtcp_patch_sha256','rtcp_arithmetic','rtcp_arithmetic_sha256')),
+                     'Instrumentation RTP/RTCP du runtime différente du catalogue signé.')
                 modules=[p for p in binary.iterdir() if p.name=='pjsua2.py' or p.name.startswith('_pjsua2') and p.suffix=='.so']
                 need(len(modules)==2,'Bindings PJSUA2 manquants ou ambigus.')
+                extension=next(p for p in modules if p.suffix=='.so')
+                with extension.open('rb') as stream:header=stream.read(20)
+                with Path('/proc/self/exe').open('rb') as stream:python_header=stream.read(20)
+                need(header[:6]==b'\x7fELF\x02\x01' and header[18:20]==python_header[18:20],
+                     'Architecture ELF PJSUA2 différente du Python natif ; aucun chargement.')
                 for module in modules:shutil.copy2(module,site/module.name)
                 shutil.copy2(binary/'binary.json',stage/'pjsip-binary.json')
             self.runtime_test(stage/'venv/bin/python')
@@ -770,7 +785,7 @@ class Manager:
 
     def runtime_test(self,python):
         command([str(python),'-c',
-          'import requests,websockets,numpy,pjsua2 as p,sys; from pathlib import Path; assert Path(p.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); e=p.Endpoint(); e.libCreate(); c=p.EpConfig(); c.logConfig.level=0; c.logConfig.consoleLevel=0; e.libInit(c); e.libStart(); e.audDevManager().setNullDev(); assert e.libVersion().full=="2.16"; assert all(any(x.codecId.startswith(k) for x in e.codecEnum2()) for k in ("G722/","PCMA/","PCMU/")); e.libDestroy()'],
+          'import requests,websockets,numpy,pjsua2 as p,sys; from pathlib import Path; assert Path(p.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); e=p.Endpoint(); e.libCreate(); c=p.EpConfig(); c.logConfig.level=0; c.logConfig.consoleLevel=0; e.libInit(c); e.libStart(); e.audDevManager().setNullDev(); assert e.libVersion().full=="2.16"; assert hasattr(p.Call,"getVoiceProbeStats"); assert all(any(x.codecId.startswith(k) for x in e.codecEnum2()) for k in ("G722/","PCMA/","PCMU/")); e.libDestroy()'],
           timeout=30,message='Import/initialisation SIP ou codecs du binaire PJSUA2 refusés ; aucune compilation sur la cible.')
 
     def prepare_docker(self,manifest,archive):

@@ -5,6 +5,7 @@ if __name__ == '__main__':
     guard(3)
 
 import argparse
+from agent_build_container import run_container
 import gzip
 import hashlib
 import json
@@ -49,7 +50,7 @@ for wheel in sorted(wheels.iterdir()):
 for p in root.rglob('*'):
  os.chown(p,int(sys.argv[2]),int(sys.argv[3]));p.chmod(0o755 if p.is_dir() else 0o644)
 '''
-    subprocess.run(docker+['run','--rm','--pull=never','--mount','type=bind,src='+str(sdk)+',dst=/out',args.builder_image,'/opt/voiceprobe/venv/bin/python','-c',code,json.dumps(PINS),str(os.getuid()),str(os.getgid())],check=True)
+    run_container(docker,['--platform','linux/'+('arm64' if args.platform=='debian-13-arm64-cp313' else 'amd64'),'--pull=never','--mount','type=bind,src='+str(sdk)+',dst=/out',args.builder_image,'/opt/voiceprobe/venv/bin/python','-c',code,json.dumps(PINS),str(os.getuid()),str(os.getgid())])
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with args.output.open('wb') as raw,gzip.GzipFile(filename='',mode='wb',fileobj=raw,mtime=0) as zipped,tarfile.open(fileobj=zipped,mode='w') as archive:
         for path in sorted(sdk.rglob('*')):
@@ -61,5 +62,5 @@ for p in root.rglob('*'):
     print(json.dumps({'platform':args.platform,'output':str(args.output),'sha256':hashlib.file_digest(args.output.open('rb'),'sha256').hexdigest()}))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--platform',required=True,choices=['ubuntu-24.04-amd64-cp312','debian-12-amd64-cp311']);p.add_argument('--sdk-dir',required=True,type=Path);p.add_argument('--builder-image',required=True);p.add_argument('--output',required=True,type=Path)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--platform',required=True,choices=['ubuntu-24.04-amd64-cp312','debian-12-amd64-cp311','debian-13-arm64-cp313']);p.add_argument('--sdk-dir',required=True,type=Path);p.add_argument('--builder-image',required=True);p.add_argument('--output',required=True,type=Path)
     build(p.parse_args())

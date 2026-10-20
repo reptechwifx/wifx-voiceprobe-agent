@@ -790,7 +790,10 @@ class Agent:
             return None
         info = platform.freedesktop_os_release()
         import sys
-        return {("ubuntu", "24.04", (3, 12)): "ubuntu-24.04-amd64-cp312", ("debian", "12", (3, 11)): "debian-12-amd64-cp311"}.get((info.get("ID"), info.get("VERSION_ID"), sys.version_info[:2]))
+        architecture = "arm64" if platform.machine() in ("aarch64", "arm64") else "amd64" if platform.machine() in ("x86_64", "amd64") else None
+        if sys.maxsize <= 2**32:
+            return None
+        return {("ubuntu", "24.04", (3, 12), "amd64"): "ubuntu-24.04-amd64-cp312", ("debian", "12", (3, 11), "amd64"): "debian-12-amd64-cp311", ("debian", "13", (3, 13), "arm64"): "debian-13-arm64-cp313"}.get((info.get("ID"), info.get("VERSION_ID"), sys.version_info[:2], architecture))
 
     def os_description(self):
         if platform.system() == "Linux":
