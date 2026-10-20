@@ -66,6 +66,16 @@ class CryptographicDistribution(unittest.TestCase):
         path=self.source.download('payload',self.out/'artifact',expected=hashlib.sha256(data).hexdigest(),size=len(data))
         self.assertEqual(data,path.read_bytes());self.assertEqual(0o600,path.stat().st_mode&0o777)
 
+    def test_qualified_dependencies_wait_for_dpkg_without_installing_arbitrary_packages(self):
+        manager=m.Manager.__new__(m.Manager)
+        with patch.object(m.subprocess,'run',return_value=types.SimpleNamespace(returncode=1,stdout='')) as queried,patch.object(m,'command') as executed,patch.object(m.pwd,'getpwnam'):
+            with self.assertRaises(m.Failure):manager.dependencies({'dependencies':['unqualified-package']})
+            queried.assert_not_called();executed.assert_not_called()
+            manager.dependencies({'dependencies':['traceroute']})
+            args=executed.call_args_list[-1]
+            self.assertEqual(['apt-get','-o','DPkg::Lock::Timeout=300','install','-y','--no-install-recommends','traceroute'],args.args[0])
+            self.assertEqual(600,args.kwargs['timeout'])
+
     def manager_catalog(self, **changes):
         raw=b'# signed management fixture\n'
         digest=hashlib.sha256(raw).hexdigest()

@@ -638,7 +638,7 @@ class Manager:
         installed=subprocess.run(['dpkg-query','-W','-f=${db:Status-Status}\n',*packages],capture_output=True,text=True)
         if installed.returncode or installed.stdout.splitlines()!=['installed']*len(packages):
             command(['apt-get','update'],timeout=300,message='Index apt indisponible ; installation Agent non basculée.')
-            command(['apt-get','install','-y','--no-install-recommends',*packages],timeout=600,message='Installation des dépendances binaires refusée ; aucune compilation source.')
+            command(['apt-get','-o','DPkg::Lock::Timeout=300','install','-y','--no-install-recommends',*packages],timeout=600,message='Installation des dépendances binaires refusée ; aucune compilation source.')
         try:pwd.getpwnam('voiceprobe')
         except KeyError:command(['useradd','--system','--home-dir','/var/lib/voiceprobe','--shell','/usr/sbin/nologin','voiceprobe'])
 
