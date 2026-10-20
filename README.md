@@ -1,5 +1,13 @@
 # WIFX Voice Probe Agent
 
+## Maintenance Docker/Synology 1.0.4
+
+Gestionnaire signé **2026102010**, Agent **0.9-026 inchangé** : normalisation ciblée
+des permissions et ACL du code de diagnostic avant vérification. Une ACL résiduelle
+ou illisible interdit le succès. Mise à jour par le Controller, sans modification
+globale des ACL Synology. [Procédure et limites](docs/docker-synology-maintenance-1.0.4.md).
+
+
 ## Maintenance Docker / Synology — installateur 1.0.3
 
 Le gestionnaire signé **2026102009** corrige la transition Docker 025 → 026.
