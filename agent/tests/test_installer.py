@@ -1,5 +1,6 @@
 """Signed Agent delivery and interruption safety. No production/real Docker access."""
 import copy
+import errno
 import hashlib
 import http.server
 import importlib.util
@@ -10,6 +11,7 @@ from pathlib import Path
 import shutil
 import socket
 import sqlite3
+import struct
 import ssl
 import subprocess
 import sys
@@ -546,6 +548,71 @@ class IncomingRollbackCompatibility(unittest.TestCase):
                 manager.assert_legacy_rollback_reports({'version':'0.9-004'})
             with sqlite3.connect(manager.data/'state.sqlite') as db:db.execute('DELETE FROM reports')
             manager.assert_legacy_rollback_reports({'version':'0.9-004'})
+
+
+class DockerDiagnosticPermissions(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.path=Path(self.tmp.name)/'bin';self.path.mkdir()
+        original=os.fstat
+        def root_info(fd):
+            info=original(fd)
+            return types.SimpleNamespace(**{k:getattr(info,k) for k in ('st_mode','st_nlink','st_dev','st_ino')},st_uid=0,st_gid=0)
+        self.owner=patch.object(m.os,'fstat',side_effect=root_info);self.owner.start();self.addCleanup(self.owner.stop)
+
+    def test_real_inherited_posix_acl_and_777_normalize_before_check(self):
+        acl=struct.pack('<I',2)+b''.join(struct.pack('<HHI',tag,7,who) for tag,who in ((1,0xffffffff),(2,1001),(4,0xffffffff),(16,0xffffffff),(32,0xffffffff)))
+        os.setxattr(self.path,'system.posix_acl_default',acl)
+        child=self.path/'child';child.mkdir();child.chmod(0o777)
+        self.assertIn('system.posix_acl_access',os.listxattr(child))
+        with patch.object(m.os,'fchown'):
+            proof=m.diagnostic_permissions(child,0o755,normalize=True)
+        self.assertEqual('0o755',proof['mode']);self.assertEqual([],os.listxattr(child))
+        self.assertIn('system.posix_acl_default',os.listxattr(self.path))
+
+    def test_parent_acl_is_never_modified(self):
+        with patch.object(m.os,'fchmod') as chmod,patch.object(m.os,'removexattr') as remove,patch.object(m.os,'getxattr',side_effect=OSError(errno.ENODATA,'absent')):
+            m.diagnostic_permissions(self.path,0o755,parent=True)
+        chmod.assert_not_called();remove.assert_not_called()
+
+    def test_residual_or_unreadable_acl_refuses_success(self):
+        for name,value in (('system.syno_acl_self',b'\x01\x00entry'),('user.unknown_acl',b'unknown')):
+            with self.subTest(name=name),patch.object(m.os,'listxattr',return_value=[name]),patch.object(m.os,'getxattr',return_value=value):
+                with self.assertRaisesRegex(m.Failure,'ACL résiduelle'):m.diagnostic_permissions(self.path,0o755)
+        with patch.object(m.os,'listxattr',side_effect=PermissionError(errno.EACCES,'denied')):
+            with self.assertRaisesRegex(m.Failure,'contrôle des permissions/ACL impossible'):m.diagnostic_permissions(self.path,0o755)
+
+    def test_virtual_synology_acl_is_queried_even_when_not_listed(self):
+        def attr(fd,name):
+            if name=='system.syno_acl_self':return b'\x01\x00grant'
+            raise OSError(errno.ENODATA,'absent')
+        with patch.object(m.os,'listxattr',return_value=[]),patch.object(m.os,'getxattr',side_effect=attr):
+            with self.assertRaisesRegex(m.Failure,'ACL résiduelle'):m.diagnostic_permissions(self.path,0o755)
+
+    def test_empty_synology_native_header_and_unknown_layout(self):
+        def attr(value):
+            def get(fd,name):
+                if name=='system.syno_acl_self':return value
+                raise OSError(errno.ENODATA,'absent')
+            return get
+        for value in (b'',b'\x01\x00\x00\x00'):
+            with patch.object(m.os,'getxattr',side_effect=attr(value)):
+                m.diagnostic_permissions(self.path,0o755)
+        for value in (b'\x01\x00',b'\x02\x00\x00\x00'):
+            with patch.object(m.os,'getxattr',side_effect=attr(value)),self.assertRaises(m.Failure):
+                m.diagnostic_permissions(self.path,0o755)
+
+    def test_failed_chmod_foreign_owner_symlink_and_hardlink_refused(self):
+        self.path.chmod(0o777)
+        with patch.object(m.os,'fchown'),patch.object(m.os,'fchmod'):
+            with self.assertRaisesRegex(m.Failure,'POSIX non conformes'):m.diagnostic_permissions(self.path,0o755,normalize=True)
+        self.owner.stop()
+        with self.assertRaisesRegex(m.Failure,'propriétaire root'):m.diagnostic_permissions(self.path,0o755)
+        link=self.path.parent/'link';link.symlink_to(self.path,target_is_directory=True)
+        with self.assertRaisesRegex(m.Failure,'symbolique'):m.diagnostic_permissions(link,0o755)
+        program=self.path/'program';program.touch();os.link(program,self.path/'alias')
+        self.owner.start()
+        with self.assertRaisesRegex(m.Failure,'objet dédié'):m.diagnostic_permissions(program,0o755,directory=False)
 
 
 class DockerNetworkWorker(unittest.TestCase):

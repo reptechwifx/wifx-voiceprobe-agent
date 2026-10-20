@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import datetime as dt
+import errno
 import fcntl
 import hashlib
 import http.client
@@ -34,7 +35,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-INSTALLER_VERSION = '1.0.3'
+INSTALLER_VERSION = '1.0.4'
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MIN_FREE = 512 * 1024 * 1024
 
@@ -229,6 +230,56 @@ def safe_directory(path, create=False):
         need(not parent.is_symlink(), 'Chemin symbolique refusé.')
     if create: path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
+
+
+def diagnostic_permissions(path, mode, gid=0, normalize=False, directory=True, parent=False):
+    """Only explicit Voice Probe diagnostic paths; never recursive or host ACL tools.
+
+    DSM chmod converts Windows ACL to UNIX permissions. POSIX default ACLs need
+    explicit removal as chmod alone leaves inheritance and named ACEs behind.
+    Check the result through the open inode, including DSM's non-listed ACL EA.
+    """
+    safe_directory(path)
+    flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK
+    if directory:flags|=os.O_DIRECTORY
+    try:
+        fd=os.open(path,flags)
+        try:
+            info=os.fstat(fd)
+            need(info.st_uid==0 and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink==1),
+                 'Diagnostic : propriétaire root et objet dédié non symbolique requis : '+str(path))
+            if normalize:
+                os.fchown(fd,0,gid)
+                os.fchmod(fd,mode)
+                for name in ('system.posix_acl_access','system.posix_acl_default'):
+                    try:os.removexattr(fd,name)
+                    except OSError as exc:
+                        if exc.errno not in (errno.ENODATA,errno.ENOTSUP):raise
+                os.fchmod(fd,mode)
+            info=os.fstat(fd)
+            need(info.st_uid==0 and info.st_gid==gid and stat.S_IMODE(info.st_mode)==mode,
+                 'Diagnostic : droits POSIX non conformes après contrôle : '+str(path))
+            names=set(os.listxattr(fd))
+            # Synology's virtual system.syno_acl_self may not appear in listxattr.
+            # No permission/inheritance parser is trusted: only absent/empty ACLs.
+            for name in names|{'system.posix_acl_access','system.posix_acl_default','system.syno_acl_self','system.syno_acl_noperm_self'}:
+                if 'acl' not in name.lower():continue
+                if parent and name=='system.posix_acl_default':continue
+                try:value=os.getxattr(fd,name)
+                except OSError as exc:
+                    if exc.errno in (errno.ENODATA,errno.ENOTSUP):continue
+                    raise
+                # DSM GPL xattr ABI: native header is 4 bytes (u16 version,
+                # alignment padding), not the packed 2-byte version field.
+                empty_syno=not value or len(value)==4 and value[:2]==b'\x01\x00'
+                need(name in ('system.syno_acl_self','system.syno_acl_noperm_self') and empty_syno,
+                     'Diagnostic : ACL résiduelle ou inconnue ; sécurité non garantie : '+str(path))
+            current=os.stat(path,follow_symlinks=False)
+            need((current.st_dev,current.st_ino)==(info.st_dev,info.st_ino),'Diagnostic : objet remplacé pendant le contrôle.')
+            return {'uid':info.st_uid,'gid':info.st_gid,'mode':oct(stat.S_IMODE(info.st_mode)),'acl':'absent_or_empty_verified'}
+        finally:os.close(fd)
+    except OSError as exc:
+        raise Failure('Diagnostic : normalisation ou contrôle des permissions/ACL impossible : '+str(path)+' (errno '+str(exc.errno)+').') from None
 
 
 def private_json(path):
@@ -649,19 +700,27 @@ except Exception:
             self.engine.call('DELETE','/containers/'+item['Id']+'?v=false&force=false')
 
     def start_network(self,image_id):
-        directory=safe_directory(self.m.code/'network-code'/'bin',create=True)
         need(self.m.code.stat().st_uid==0 and not self.m.code.stat().st_mode&0o022,'Code du diagnostic root non modifiable par l’Agent requis.')
-        for path in (directory.parent,directory):
-            need(path.stat().st_uid==0 and not path.stat().st_mode&0o022,'Code diagnostic non sûr.')
-            path.chmod(0o755)
+        # Parent is audited, never normalized. Only these dedicated diagnostic
+        # paths may be changed, one inode at a time, parents before children.
+        diagnostic_permissions(self.m.code,stat.S_IMODE(self.m.code.stat().st_mode),parent=True)
+        code=safe_directory(self.m.code/'network-code',create=True)
+        diagnostic_permissions(code,0o755,normalize=True)
+        directory=safe_directory(code/'bin',create=True)
+        diagnostic_permissions(directory,0o755,normalize=True)
         program=directory/'traceroute';expected=hashlib.sha256(DOCKER_NETWORK_PROGRAM.encode()).hexdigest()
-        need(not program.is_symlink() and (not program.exists() or program.stat().st_uid==0 and not program.stat().st_mode&0o022),'Programme diagnostic non sûr.')
+        need(not program.is_symlink() and (not program.exists() or program.is_file() and program.stat().st_uid==0 and program.stat().st_nlink==1),'Programme diagnostic non sûr.')
         if not program.exists() or digest(program)!=expected:
-            temporary=directory/'traceroute.new';need(not temporary.is_symlink(),'Programme temporaire symbolique refusé.')
-            temporary.write_text(DOCKER_NETWORK_PROGRAM);temporary.chmod(0o755);os.replace(temporary,program)
+            with tempfile.NamedTemporaryFile(dir=directory,prefix='.traceroute-',delete=False) as output:
+                temporary=Path(output.name);output.write(DOCKER_NETWORK_PROGRAM.encode())
+            try:
+                diagnostic_permissions(temporary,0o755,normalize=True,directory=False)
+                os.replace(temporary,program)
+            finally:temporary.unlink(missing_ok=True)
+        diagnostic_permissions(program,0o755,normalize=True,directory=False)
         sockets=safe_directory(self.m.code/'network-socket',create=True)
-        need(sockets.stat().st_uid==0,'Répertoire de socket diagnostic non sûr.')
-        os.chown(sockets,0,1000);sockets.chmod(0o750)
+        diagnostic_permissions(sockets,0o750,gid=1000,normalize=True)
+        self.m.settings['network_filesystem_verified']=self.verify_network_filesystem()
         item=self.network_container()
         if item and not self.network_worker_matches(item,image_id,expected):
             self.remove_network();item=None
@@ -696,6 +755,8 @@ except Exception:
                 and worker['Config'].get('Labels',{}).get('net.wifx.network-code')==expected)
 
     def network_profile_matches(self):
+        try:self.verify_network_filesystem()
+        except (Failure,OSError):return False
         item=self.inspect()
         if not item:return False
         host=item['HostConfig'];security=[v.replace('=',':') for v in host.get('SecurityOpt') or []]
@@ -710,6 +771,15 @@ except Exception:
                 and {(str(self.m.code/'network-code'),'/opt/voiceprobe-network',False),(str(self.m.code/'network-socket'),'/run/voiceprobe-network',False)}<=mounts
                 and worker['State']['Running'] and self.network_worker_matches(worker,item['Image'],expected)
                 and (self.m.code/'network-code/bin/traceroute').is_file() and digest(self.m.code/'network-code/bin/traceroute')==expected)
+
+    def verify_network_filesystem(self):
+        need(not self.m.code.stat().st_mode&0o022,'Code du diagnostic root non modifiable par l’Agent requis.')
+        proof={'.':diagnostic_permissions(self.m.code,stat.S_IMODE(self.m.code.stat().st_mode),parent=True)}
+        paths=[(self.m.code/'network-code',0o755,0,True),(self.m.code/'network-code/bin',0o755,0,True),
+               (self.m.code/'network-code/bin/traceroute',0o755,0,False),(self.m.code/'network-socket',0o750,1000,True)]
+        proof.update({str(path.relative_to(self.m.code)):diagnostic_permissions(path,mode,gid,directory=directory)
+                      for path,mode,gid,directory in paths})
+        return proof
 
     def verify_network_profile(self):
         self.m.settings.pop('network_profile_verified',None)
