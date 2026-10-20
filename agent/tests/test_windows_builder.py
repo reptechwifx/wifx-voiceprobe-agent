@@ -1,19 +1,53 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import importlib.util
+import hashlib
 import io
+import json
 from pathlib import Path
 import tarfile
 import tempfile
 import struct
+import sys
 import unittest
 
 TOOL = Path(__file__).resolve().parents[1] / 'windows/build-pjsip-windows.py'
+sys.path.insert(0, str(TOOL.parent))
 spec = importlib.util.spec_from_file_location('windows_pjsip_builder', TOOL)
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
+from pjsip_contract import validate_binding
 
 
 class WindowsBuilderTest(unittest.TestCase):
+    def test_portable_sdk_rejects_stale_native_observer_and_missing_exports(self):
+        project = TOOL.parents[2]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = {'rtp_observer_protocol': 1, 'rtp_playout_distribution_protocol': 2,
+                        'rtcp_arithmetic': 'vp-rtcp-safe-v1'}
+            for name, source in [('observer_sha256', 'agent/installer/rtp-observer.h'),
+                                 ('rtcp_arithmetic_sha256', 'agent/installer/rtcp-safe.h'),
+                                 ('rtcp_patch_sha256', 'scripts/instrument-pjsip.py')]:
+                metadata[name] = hashlib.sha256((project / source).read_bytes()).hexdigest()
+            (root / 'binary.json').write_text(json.dumps(metadata))
+            (root / 'pjsua2.py').write_text('class Call:\n    def getVoiceProbeStats(self, index): pass\n')
+            binary = b'Call_getVoiceProbeStats\0vp-rtcp-safe-v1\0'
+            (root / '_pjsua2.pyd').write_bytes(binary)
+            self.assertEqual(validate_binding(root, project)['binding_sha256'], hashlib.sha256(binary).hexdigest())
+            for marker in (b'Call_getVoiceProbeStats', b'vp-rtcp-safe-v1'):
+                (root / '_pjsua2.pyd').write_bytes(binary.replace(marker, b''))
+                with self.subTest(marker=marker), self.assertRaises(ValueError):
+                    validate_binding(root, project)
+            (root / '_pjsua2.pyd').write_bytes(binary)
+            (root / 'pjsua2.py').write_text('class Call: pass\n')
+            with self.assertRaises(ValueError):
+                validate_binding(root, project)
+            (root / 'pjsua2.py').write_text('class Call:\n    def getVoiceProbeStats(self, index): pass\n')
+            metadata['observer_sha256'] = '0' * 64
+            (root / 'binary.json').write_text(json.dumps(metadata))
+            with self.assertRaises(ValueError):
+                validate_binding(root, project)
+
     def test_dependencies_require_exact_windows_python_abi_and_architecture(self):
         header = 'file format pei-x86-64\nDLL Name: python313.dll\nDLL Name: libwinpthread-1.dll\nDLL Name: KERNEL32.dll\n'
         self.assertEqual(len(builder.validate_dependencies(header)), 3)

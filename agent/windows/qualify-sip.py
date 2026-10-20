@@ -94,8 +94,17 @@ def main():
                 metrics = agent.reports[run_id]
                 rtp = metrics.get('rtp') or {}
                 audio = metrics.get('audio') or {}
-                success = bool(metrics.get('established') and (rtp.get('codec') or '').startswith(codec.split('/')[0] + '/') and (rtp.get('rx') or {}).get('packets', 0) > 100 and (rtp.get('tx') or {}).get('packets', 0) > 100 and (audio.get('tone_ratio_mean') or 0) > .80 and (audio.get('alignment_confidence') or 0) > .50 and audio.get('echo_delay_ms') is not None)
-                item = {'transport': transport, 'requested_codec': codec, 'simultaneous': concurrent, 'passed': success, 'metrics': metrics}
+                rx = rtp.get('rx') or {}
+                intervals = rx.get('intervals') or []
+                receiver_observed = bool(
+                    rx.get('timing', {}).get('histogram', {}).get('count', 0) > 2
+                    and rx.get('pjsip_jitter', {}).get('method') == 'vp-rtcp-safe-v1'
+                    and any(part.get('duration_s', 0) > 0
+                            and part.get('playout', {}).get('received', 0) > 0
+                            and part.get('timing', {}).get('clock_stable') is True
+                            for part in intervals))
+                success = bool(receiver_observed and metrics.get('established') and (rtp.get('codec') or '').startswith(codec.split('/')[0] + '/') and rx.get('packets', 0) > 100 and (rtp.get('tx') or {}).get('packets', 0) > 100 and (audio.get('tone_ratio_mean') or 0) > .80 and (audio.get('alignment_confidence') or 0) > .50 and audio.get('echo_delay_ms') is not None)
+                item = {'transport': transport, 'requested_codec': codec, 'simultaneous': concurrent, 'receiver_observed': receiver_observed, 'receiver_intervals': len(intervals), 'passed': success, 'metrics': metrics}
                 result['calls'].append(item)
                 return success
 

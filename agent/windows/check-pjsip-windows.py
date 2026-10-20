@@ -22,6 +22,8 @@ def main():
     # Keep the DLL-directory handle alive until libDestroy has completed.
     with os.add_dll_directory(str(directory)):
         import pjsua2 as pj
+        if not callable(getattr(pj.Call, 'getVoiceProbeStats', None)):
+            raise ValueError('Observateur RTP absent du binding PJSIP Windows.')
         endpoint = pj.Endpoint()
         endpoint.libCreate()
         try:
@@ -37,7 +39,7 @@ def main():
             codecs = sorted(codec.codecId for codec in endpoint.codecEnum2())
             if version != '2.16' or not all(any(value.startswith(name + '/') for value in codecs) for name in ('G722', 'PCMA', 'PCMU')):
                 raise ValueError('Version PJSIP ou codecs qualifiés absents.')
-            report = {'platform': platform.platform(), 'architecture': platform.machine(), 'python': platform.python_version(), 'pjsip': version, 'codecs': codecs, 'null_audio_device': True, 'lib_create_init_start_destroy': True, 'binding_sha256': hashlib.sha256((directory / '_pjsua2.pyd').read_bytes()).hexdigest()}
+            report = {'platform': platform.platform(), 'architecture': platform.machine(), 'python': platform.python_version(), 'pjsip': version, 'codecs': codecs, 'receiver_timing': True, 'playout_observer': True, 'null_audio_device': True, 'lib_create_init_start_destroy': True, 'binding_sha256': hashlib.sha256((directory / '_pjsua2.pyd').read_bytes()).hexdigest()}
         finally:
             endpoint.libDestroy()
     if args.report:

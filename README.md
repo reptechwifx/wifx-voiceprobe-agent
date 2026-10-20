@@ -9,7 +9,7 @@
 
 **Windows portable x64 — 0.5.0-LAB, QUALIFIÉ EN LAB — NON SIGNÉ AUTHENTICODE.** Les sources et outils de construction sont disponibles ; aucun EXE Windows destiné aux clients n’est publié. Le paquet privé prépare un EXE unique avec provisioning signé, interface de statut en lecture seule, réduction dans la zone de notification et identité Windows CNG liée à l’instance, réutilisable entre interventions explicitement approuvées par WIFX. Le nettoyage explicite utilise le même EXE avec `--forget-identity`, après confirmation **Non par défaut**. Les binaires locaux restent LAB, non signés Authenticode ; la signature de production et la qualification complète sont distinctes. Voir le [guide Windows portable](docs/windows-portable.md) et la [construction Windows](docs/windows-construction.md). Les commandes et la Release Linux ci-dessus restent inchangées.
 
-Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-021 · installateurs 1.0.2 · PJSIP/PJSUA2 2.16 corrigé et précompilé.**
+Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-024 r2 · installateurs 1.0.2 · PJSIP/PJSUA2 2.16 corrigé et précompilé.**
 
 ¹ Synology : profil logiciel BusyBox/Container Manager vérifié en laboratoire ; aucun NAS physique n’a été testé. L’architecture est Intel x86-64, jamais ARM. Les commandes ci-dessus sont interactives ; SSH avec terminal et droits sudo est requis. En session root autorisée, omettre `sudo`.
 
@@ -40,6 +40,35 @@ Les données, identités et credentials sont séparés des binaires : `/opt/voic
 
 ## Mise à jour et exploitation
 
+Pour la transition native **0.9-021 → 0.9-024**, l'ancien gestionnaire peut afficher
+« Dépendances non qualifiées ; aucun paquet arbitraire installé. » Il refuse les
+nouveaux paquets `traceroute` et `libcap2-bin` avant de pouvoir se remplacer.
+Relancer une fois par le bootstrap officiel, qui vérifie le nouveau gestionnaire
+signé avant d'exécuter la mise à jour :
+
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- update --strict
+```
+
+Exiger `VOICEPROBE_AGENT_RESULT=VERIFIED_SUCCESS`. Le gestionnaire installe les
+dépendances qualifiées depuis les dépôts du système et conserve l'identité et les
+paramètres ; aucune installation manuelle de paquet n'est nécessaire. Après cette
+reprise, les prochaines mises à jour utilisent de nouveau la commande locale ou
+l'action du Controller. Le refus de paquets concerne le mode **natif**.
+
+Pour la première transition **Docker/DSM 0.9-021 → 0.9-024**, utiliser aussi le
+bootstrap afin que le nouveau gestionnaire applique le profil ICMP qualifié :
+
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- update --strict --backend docker
+```
+
+Pour une installation personnalisée, reprendre ses options `--data-root` et
+`--instance`. La reprise r2 est vérifiée sur Debian 12, Ubuntu 24.04 et Docker
+AMD64 en LAB : configuration conservée, seconde mise à jour idempotente et
+diagnostics UDP/ICMP 10/10. Le conteneur reste en UID 1000, racine en lecture
+seule, `cap_drop: ALL`, avec `NET_RAW` seul ajouté ; aucun mode privilégié.
+
 ```sh
 sudo voiceprobe-agent status
 sudo voiceprobe-agent update --check
@@ -63,7 +92,7 @@ Une interruption se reprend avec la même commande. Une perte du mot de passe n�
 
 ## Téléchargements, signatures et licences
 
-[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-009-installer-1.0.2) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-009-installer-1.0.2/SHA256SUMS) · [Qualification](docs/qualification-0.9-009.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
+[Release officielle](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/tag/agent-0.9-024-installer-1.0.2-r2) · [SHA-256](https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-024-installer-1.0.2-r2/SHA256SUMS) · [Qualification](docs/qualification-0.9-009.md) · [Signatures](docs/signatures.md) · [Licences](docs/licences.md).
 
 Les manifestes sont signés RSA4096/SHA256 avec une racine de production épinglée dans le bootstrap. Empreinte SPKI SHA-256 : `f65020bb2c6139ba381094533afa0a28fbf3b34f7d6203f2a140b9ce999fde55`. TLS protège le premier téléchargement officiel ; les signatures authentifient ensuite les catalogues et empreintes. Les séquences et expirations sont vérifiées. Les images sont des archives publiques importées automatiquement et vérifiées par identité immuable ; aucun GHCR/Registry privé client n’est requis.
 

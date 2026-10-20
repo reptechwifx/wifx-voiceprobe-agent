@@ -53,13 +53,20 @@ Le SDK contient uniquement `_pjsua2.pyd`, `pjsua2.py`, `libwinpthread-1.dll`, le
 
 Le pilote refuse les chemins d’archives sortant de leur racine, les liens, les fichiers spéciaux, un SDK incorrect, une destination existante et une dépendance DLL inconnue. Le SDK conserve les SHA-256 des fichiers produits. `binary.json` indique `windows_qualified: false` jusqu’à la qualification complète indépendante.
 
+La construction applique aussi l'observateur RTP et le correctif arithmétique RTCP
+du moteur commun. Le SDK et le packager refusent un wrapper sans
+`Call.getVoiceProbeStats`, un module natif sans cet export ou des empreintes
+d'instrumentation différentes des sources. Le reçu de l'EXE conserve les
+empreintes du module natif et du wrapper réellement utilisés. Une version PJSIP
+2.16 et des codecs présents ne suffisent donc pas à qualifier ce SDK.
+
 Sur Windows réel, depuis Python 3.13 x64 :
 
 ```powershell
 python.exe agent/windows/check-pjsip-windows.py --module-dir var/windows-agent/pjsip-sdk --report pjsip-check.json
 ```
 
-Ce contrôle charge réellement le binding puis exécute `libCreate`, `libInit`, `libStart`, la sélection du périphérique audio nul, l’énumération des codecs et `libDestroy`. Il ne contient aucun compte SIP et n’effectue aucun appel. Les essais REGISTER, Digest, RTP, écho, concurrence, adoption et révocation sont consignés séparément dans le rapport de qualification.
+Ce contrôle charge réellement le binding, exige l'observateur RTP puis exécute `libCreate`, `libInit`, `libStart`, la sélection du périphérique audio nul, l’énumération des codecs et `libDestroy`. Il ne contient aucun compte SIP et n’effectue aucun appel. Les essais REGISTER, Digest, RTP, écho, concurrence, adoption et révocation sont consignés séparément dans le rapport de qualification. Le harnais SIP exige désormais des intervalles RTP contenant des trames reçues et une horloge valide, ainsi que la provenance du correctif RTCP.
 
 ## Licences et limites de distribution
 

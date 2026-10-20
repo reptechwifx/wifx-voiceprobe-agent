@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 
+from pjsip_contract import validate_binding
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -27,6 +29,7 @@ def main():
     if args.output.exists():
         raise ValueError('Destination existante refusée.')
     root = Path(__file__).resolve().parents[2]
+    binding = validate_binding(args.sdk, root)
     policy = json.loads((args.trust/'build-trust.json').read_text(encoding='utf-8'))
     if policy['qualification'] != 'lab':
         raise ValueError('Seuls les candidats LAB sont construits ici ; qualification client distincte.')
@@ -52,7 +55,9 @@ def main():
                         str(root/'agent/windows/portable.spec')], env=env, check=True)
     if source_manifest() != source_hashes:
         raise ValueError('Sources modifiées pendant la construction ; candidat non qualifiable.')
-    receipt = {'trust': {'provisioning_spki_sha256': spki, 'lab_controller_url': policy['controller_url']}, 'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'agent_version': (root/'agent/windows/release/VERSION').read_text().strip(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
+    if validate_binding(args.sdk, root) != binding:
+        raise ValueError('SDK PJSIP modifié pendant la construction ; candidat non qualifiable.')
+    receipt = {'trust': {'provisioning_spki_sha256': spki, 'lab_controller_url': policy['controller_url']}, 'pjsip_binding': binding, 'source_sha256': source_hashes, 'qualification': 'LAB_UNSIGNED_NOT_FOR_CLIENTS', 'python': platform.python_version(), 'agent_version': (root/'agent/windows/release/VERSION').read_text().strip(), 'portable_version': (root/'agent/windows/VERSION').read_text().strip(), 'artifacts': []}
     for f in sorted(args.output.glob('*.exe')):
         receipt['artifacts'].append({'file': f.name, 'bytes': f.stat().st_size,
                                     'sha256': hashlib.sha256(f.read_bytes()).hexdigest()})

@@ -19,6 +19,8 @@ def self_test():
     import pjsua2 as pj
     import cryptography
     import numpy
+    if not callable(getattr(pj.Call, 'getVoiceProbeStats', None)):
+        raise RuntimeError('Observateur RTP absent du moteur SIP Windows.')
     endpoint = pj.Endpoint()
     endpoint.libCreate()
     try:
@@ -36,7 +38,8 @@ def self_test():
                 'architecture': platform.machine(), 'python': platform.python_version(),
                 'pjsip': endpoint.libVersion().full, 'numpy': numpy.__version__,
                 'cryptography': cryptography.__version__, 'codecs': codecs,
-                'audio': 'null-device', 'local_administration': False}
+                'audio': 'null-device', 'receiver_timing': True, 'playout_observer': True,
+                'local_administration': False}
     finally:
         endpoint.libDestroy()
 

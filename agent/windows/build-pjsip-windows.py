@@ -11,6 +11,8 @@ from pathlib import Path
 import subprocess
 import tarfile
 
+from pjsip_contract import validate_binding
+
 SOURCE_SHA256 = "3af2e481d51aaa095897820fa2ee26c30e530590c6ca56d23e4133bbdad369eb"
 BUILDER = "voiceprobe-agent-windows-pjsip-builder:1.0.0"
 DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
@@ -105,6 +107,7 @@ def main():
     runtime_dependencies = validate_dependencies((args.output / "winpthread-pe-headers.txt").read_text(), runtime=True)
     metadata = {"pjsip": "2.16", "python_abi": "cp313", "architecture": "AMD64", "cpu_baseline": "x86-64 generic", "source_sha256": SOURCE_SHA256, "codecs_required": ["G722", "PCMA", "PCMU"], "calls": 128, "accounts": 32, "sound": "null device", "sip_tls": False, "dependencies": dependencies, "runtime_dependencies": runtime_dependencies, "python_runtime_sha256": hashlib.sha256((sdk / "python313.dll").read_bytes()).hexdigest(), "builder_image": json.loads(subprocess.check_output(DOCKER + ["image", "inspect", BUILDER]))[0]["Id"], "windows_qualified": False, "rtcp_patch_sha256": hashlib.sha256((project/"scripts/instrument-pjsip.py").read_bytes()).hexdigest(), "rtcp_arithmetic": "vp-rtcp-safe-v1", "rtcp_arithmetic_sha256": hashlib.sha256((project/"agent/installer/rtcp-safe.h").read_bytes()).hexdigest(), "rtp_playout_distribution_protocol": 2, "rtp_observer_protocol": 1, "observer_sha256": hashlib.sha256((project/"agent/installer/rtp-observer.h").read_bytes()).hexdigest()}
     (args.output / "binary.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    validate_binding(args.output, project)
     checksums = "".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in sorted(args.output.iterdir()) if path.is_file() and path.name != "SHA256SUMS")
     (args.output / "SHA256SUMS").write_text(checksums)
     print("Bibliothèques PE AMD64 construites. Import et tests Windows restent obligatoires.")
