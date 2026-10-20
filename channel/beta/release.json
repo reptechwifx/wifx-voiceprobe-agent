@@ -2,11 +2,11 @@
   "schema": 1,
   "installer_protocol": 1,
   "installer_version": "1.0.2",
-  "sequence": 2026101804,
-  "expires": 1800114931,
-  "version": "0.9-021",
-  "release_id": "0.9-021-97a012229c7a",
-  "source_revision": "97a012229c7aed0ba090646ce9097d25ecbb8b91",
+  "sequence": 2026102002,
+  "expires": 1800248826,
+  "version": "0.9-024",
+  "release_id": "0.9-024-a86674147a4b",
+  "source_revision": "a86674147a4bda9ae3f027bd0a05549e63f9ca41",
   "development": false,
   "data_schema": 1,
   "rollback_compatible": true,
@@ -21,20 +21,21 @@
     "0.9-017",
     "0.9-019",
     "0.9-020",
-    "0.9-021"
+    "0.9-021",
+    "0.9-024"
   ],
   "legacy_main_sha256": [
     "4eb79eb3e132ca033689b75d06f559d9a012657ac0dfd14e5731b03b45a30a32"
   ],
   "manager": {
-    "name": "agent-manager-28ae0907ee4d.py",
-    "bytes": 94920,
-    "sha256": "28ae0907ee4d83dfa41212d517dcbfea41ad2377aa5630c9961c4b8231030d5f"
+    "name": "agent-manager-8ebf1279256f.py",
+    "bytes": 96649,
+    "sha256": "8ebf1279256ff7c972839429e19985ec89325c8f41d026aafb07b1f722cb3efd"
   },
   "agent": {
-    "name": "voiceprobe-agent-0.9-021-97a012229c7a.tar.gz",
-    "bytes": 156989,
-    "sha256": "f0efd664b8df6ae3fd35d6d1c7747e33361e3d5e64dc2e631327978b29e200d3"
+    "name": "voiceprobe-agent-0.9-024-a86674147a4b.tar.gz",
+    "bytes": 163958,
+    "sha256": "68901f187d229c00b41cd790d514d9270f87d47a7ea498e144877c0165a38678"
   },
   "runtimes": {
     "ubuntu-24.04-amd64-cp312": {
@@ -50,6 +51,8 @@
         "ca-certificates",
         "openssl",
         "iproute2",
+        "traceroute",
+        "libcap2-bin",
         "libopus0",
         "libstdc++6",
         "libgcc-s1",
@@ -78,6 +81,8 @@
         "ca-certificates",
         "openssl",
         "iproute2",
+        "traceroute",
+        "libcap2-bin",
         "libopus0",
         "libstdc++6",
         "libgcc-s1",
@@ -95,13 +100,13 @@
     }
   },
   "docker": {
-    "name": "voiceprobe-agent-image-0.9-021-97a012229c7a.tar.gz",
-    "bytes": 291383413,
-    "sha256": "8eeac6cb61acebc2598ab7344ae617e73bf0a8a313226004046a7dd63243402b",
-    "reference": "voiceprobe-agent-runtime:0.9-021-97a012229c7a",
+    "name": "voiceprobe-agent-image-0.9-024-a86674147a4b.tar.gz",
+    "bytes": 248661774,
+    "sha256": "d57e81d54bd042348ca76f6c9cbf8ef3e8aa3b49f65d1abb2a35448cb3791ff1",
+    "reference": "voiceprobe-agent-runtime:0.9-024-a86674147a4b",
     "image_ids": [
-      "sha256:12c4aeb37b0e437b7156709efaf632ea3d60efb94e4a36febee35dee48ccaaa1",
-      "sha256:2ba61801dbb4e3320a057eeb937d0343eae545c32cc809976c28e5c7d6db26c2"
+      "sha256:005183d39861aae651591b1c23e8f7c85c64f8514b7033b453b3ab2f183f806f",
+      "sha256:0a770dc1443d324c976112c5973217db6b97435e9a62c20396f313806f80fd6b"
     ],
     "rootfs_diff_ids": [
       "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
@@ -122,15 +127,12 @@
       "sha256:7e4dedf987d7889d178a15668bfd6a0ab19d3c28244d442b490fd9a4d1f79d6b",
       "sha256:242d77c75caf47eef3856b6434ebfb3327531b4d04ed8c567b98ff298865818b",
       "sha256:e70788a545e3a57cf066a66669acb47e22a524ddbae0c9fab54cb06becfe7e02",
-      "sha256:62272e37d70f843faa5ddf1fbb6fd7f46c0e77f02adaaeecd8ab1a2725adbea6",
-      "sha256:7fe2c90b079c077091126d2606a815895cb8dd92b6a269afb408049dfdd29211",
-      "sha256:153045798e2d2c4160863e8b2e89b86b0c641f6b408496b4e5f484599f63086d",
-      "sha256:9603dde27a2f5a8d0ba1519e307d488c136f89d9c381dc98666cf0b15c541eb8",
-      "sha256:80b24324d549a414abe7711c8ba209d525ec3acd9417c27e7d565d6d0a769758",
-      "sha256:164ad2b69dba4b2a11b357494cef73a8d37880e96baf57e499e7097622f2fc96"
+      "sha256:229bd761f8520f4dce55e0c0cf687d5670d99bd2625a59b27a50913ec667fc1b",
+      "sha256:475a4e7bc71b69a1668777d9d688c0650a4f85b07a42e85b06e5d2f0030d24c1",
+      "sha256:b3b8fba722ba90f88429ee6fd569b8c1b111ac95906267858aaf87e8ca716c75"
     ]
   },
-  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-021-installer-1.0.2",
+  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-024-installer-1.0.2-r2",
   "corresponding_sources": [
     {
       "name": "corresponding-sources-agent-0.9-004.tar.gz",
@@ -141,6 +143,11 @@
       "name": "corresponding-sources-rtcp-safe-0.9-017.tar.gz",
       "bytes": 10745375,
       "sha256": "b2a9f3e1384d46ff9f38cab1c6b3a208ae0e3971469b4444d5106f1be010113f"
+    },
+    {
+      "name": "corresponding-sources-traceroute-0.9-024.tar.gz",
+      "bytes": 85775,
+      "sha256": "957f45ede6d05dc8607da57dc12b289fbc0021e6729817b6ef09d8c29b924e07"
     }
   ]
 }
