@@ -1,5 +1,27 @@
 # WIFX Voice Probe Agent
 
+## Maintenance Docker / Synology — installateur 1.0.3
+
+Le gestionnaire signé **2026102009** corrige la transition Docker 025 → 026.
+La version Agent et l'image 026 restent identiques ; aucune release publiée
+n'est remplacée. La mise à jour normale se lance depuis **Agents → Mettre à jour**,
+sans SSH lorsque la maintenance distante est déjà activée.
+
+L'Agent reste UID/GID1000, racine readonly, `cap_drop: ALL`, sans capacité et avec
+`no-new-privileges`. Un auxiliaire dédié `voiceprobe-agent-network-INSTANCE`
+exécute les seules sondes UDP/ICMP : UID0/GID1000, seul NET_RAW effectif,
+readonly et no-new-privileges, sans Docker.sock ni donnée SIP. Il réutilise la
+même image signée. Aucun mode privileged ou NET_ADMIN. Le gestionnaire vérifie
+les capacités réellement utilisées et interroge NNP par prctl, même si le champ
+NoNewPrivs est absent de /proc. Un échec conserve sa cause et les données ; une
+version identique conforme n'est pas réinstallée.
+
+Qualification Docker réelle en LAB, avec signatures, installation neuve,
+transition distante, rollback, interruption/reprise et UDP/ICMP capturés.
+Les dispositions /proc 3.10/4.4 sont simulées ; aucun noyau Synology ni NAS
+physique n'a été utilisé par Codex. Docker rootless reste hors qualification.
+Voir [la procédure opérateur](docs/docker-synology-maintenance-1.0.3.md).
+
 ## Bêta 0.9-026 — Debian 13 ARM64
 
 Même Agent Linux, même GUI sur le port **18441**, même installateur signé et même maintenance distante. La plateforme supplémentaire est Debian 13 64 bits / Python 3.13 / ARM64 (aarch64), pour Raspberry Pi 4. ARMHF et Docker ARM64 ne sont pas pris en charge. Aucun build n’est effectué sur la cible ; les dépendances Python sont fournies hors ligne avec leurs empreintes.
