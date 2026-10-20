@@ -34,9 +34,148 @@ import urllib.parse
 import urllib.request
 import uuid
 
-INSTALLER_VERSION = '1.0.2'
+INSTALLER_VERSION = '1.0.3'
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MIN_FREE = 512 * 1024 * 1024
+
+# Installed from this signed manager, never downloaded or supplied by the Agent.
+# One read-only program serves as bounded worker and unprivileged traceroute proxy.
+DOCKER_NETWORK_PROFILE = 'isolated-net-raw-v1'
+DOCKER_NETWORK_PROGRAM = r'''#!/usr/bin/python3
+import argparse, ctypes, ipaddress, json, os, re, socket, stat, struct, subprocess, sys, threading, time
+from pathlib import Path
+
+SOCKET='/run/voiceprobe-network/diagnostics.sock'
+RAW=1<<13
+
+def process_state(pid='self'):
+    values=dict(line.split(':',1) for line in Path('/proc/'+str(pid)+'/status').read_text().splitlines() if ':' in line)
+    return {key:values[key].strip() for key in ('Uid','Gid','CapPrm','CapEff','CapBnd')}
+
+def no_new_privileges():
+    libc=ctypes.CDLL(None,use_errno=True)
+    result=libc.prctl(39,0,0,0,0)  # PR_GET_NO_NEW_PRIVS, available since Linux 3.5.
+    if result not in (0,1):raise OSError(ctypes.get_errno(),'PR_GET_NO_NEW_PRIVS unavailable')
+    return bool(result)
+
+def peer(value):
+    address=ipaddress.ip_address(value)
+    if address.is_unspecified or address.is_multicast or address.is_link_local or (address.is_reserved and not address.is_loopback):
+        raise ValueError('Invalid numeric unicast peer')
+    return str(address)
+
+def trace(request,verification=False):
+    if set(request)!={'operation','method','peer','queries','hops','wait','sport'}:raise ValueError('Unknown request')
+    method=request['method'];address=peer(request['peer'])
+    if method not in ('udp','icmp') or type(request['queries']) is not int or not 1<=request['queries']<=10 or type(request['hops']) is not int or not 1<=request['hops']<=20:
+        raise ValueError('Invalid method or bounds')
+    if request['wait'] not in (.1,.5) or type(request['sport']) is not int or request['sport'] not in (65001,65002):raise ValueError('Invalid probe parameters')
+    args=['/usr/bin/traceroute.db','-n','-q',str(request['queries']),'-m',str(request['hops']),'-N','1','-t','184']
+    args+=['-U','--sport='+str(request['sport']),'-p','65000'] if method=='udp' else ['-I']
+    if verification:args+=['-z','.05']
+    args+=['-w',str(request['wait']),address,'100']
+    process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env={'PATH':'/usr/bin:/bin','LANG':'C'})
+    observed=[]
+    if verification:
+        deadline=time.monotonic()+2
+        while process.poll() is None and time.monotonic()<deadline:
+            try:
+                if Path('/proc/'+str(process.pid)+'/comm').read_text().strip().startswith('traceroute'):
+                    observed.append(process_state(process.pid))
+            except OSError:pass
+            time.sleep(.005)
+    try:stdout,stderr=process.communicate(timeout=16)
+    except subprocess.TimeoutExpired:
+        process.kill();process.communicate();return {'exit':124,'stdout':'','stderr':'Diagnostic time budget exceeded'}
+    if len(stdout)+len(stderr)>65536:raise ValueError('Diagnostic output too large')
+    return {'exit':process.returncode,'stdout':stdout,'stderr':stderr,'observed_processes':observed}
+
+def serve():
+    state=process_state()
+    if os.geteuid()!=0 or os.getegid()!=1000 or not no_new_privileges() or any(int(state[k],16)!=RAW for k in ('CapPrm','CapEff','CapBnd')):
+        raise RuntimeError('Isolated worker requires only NET_RAW and no-new-privileges')
+    path=Path(SOCKET)
+    if path.exists():
+        info=path.lstat()
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid!=0 or info.st_gid!=1000:raise RuntimeError('Foreign socket')
+        path.unlink()
+    os.umask(0o117)
+    server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);server.bind(SOCKET);server.listen(4)
+    slots=threading.BoundedSemaphore(2)
+    def handle(connection):
+        try:
+            connection.settimeout(2)
+            _,uid,_=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+            if uid!=1000:raise ValueError('Unprivileged Agent only')
+            raw=b''
+            while b'\n' not in raw:
+                block=connection.recv(2048)
+                if not block or len(raw)+len(block)>2048:raise ValueError('Invalid request size')
+                raw+=block
+            request=json.loads(raw);connection.settimeout(20)
+            if request=={'operation':'verify'}:
+                results={}
+                for method in ('udp','icmp'):
+                    result=trace({'operation':'trace','method':method,'peer':'127.0.0.1','queries':3,'hops':1,'wait':.1,'sport':65001},True)
+                    seen=result.pop('observed_processes',[])
+                    if result['exit'] or not re.search(r'^\s*1\s+127\.0\.0\.1\s',result['stdout'],re.M) or not seen or any(int(s['CapEff'],16)!=RAW or int(s['Uid'].split()[1])!=0 for s in seen):
+                        raise RuntimeError('Real diagnostic permissions not verified: '+method)
+                    results[method]={'passed':True,'effective':[RAW]}
+                answer={'profile':'isolated-net-raw-v1','worker_uid':0,'worker_gid':1000,'worker_capabilities':state,'worker_no_new_privileges':no_new_privileges(),'no_new_privileges_source':'prctl','loopback':results}
+            elif isinstance(request,dict) and request.get('operation')=='trace':answer=trace(request)
+            else:raise ValueError('Unknown operation')
+            connection.sendall(json.dumps(answer).encode()+b'\n')
+        except Exception as error:
+            try:connection.sendall(json.dumps({'exit':77,'stdout':'','stderr':'Isolated diagnostic refused: '+type(error).__name__}).encode()+b'\n')
+            except OSError:pass
+        finally:connection.close();slots.release()
+    while True:
+        connection,_=server.accept()
+        if slots.acquire(blocking=False):threading.Thread(target=handle,args=(connection,),daemon=True).start()
+        else:
+            connection.sendall(b'{"exit":75,"stdout":"","stderr":"Diagnostic worker busy"}\n');connection.close()
+
+def exchange(request):
+    info=Path(SOCKET).lstat()
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid!=0 or info.st_gid!=1000 or stat.S_IMODE(info.st_mode)!=0o660:
+        raise RuntimeError('Untrusted diagnostic socket')
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as connection:
+        connection.settimeout(18);connection.connect(SOCKET)
+        _,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+        if uid!=0 or gid!=1000:raise RuntimeError('Untrusted diagnostic worker')
+        connection.sendall(json.dumps(request).encode()+b'\n');raw=b''
+        while b'\n' not in raw:
+            block=connection.recv(65536)
+            if not block or len(raw)+len(block)>131072:raise RuntimeError('Invalid diagnostic response')
+            raw+=block
+    return json.loads(raw)
+
+def proxy():
+    if sys.argv[1:]==['--vp-verify']:
+        if os.geteuid()!=1000 or not no_new_privileges():raise RuntimeError('Unprivileged Agent protection missing')
+        state=process_state()
+        if any(int(state[k],16) for k in ('CapPrm','CapEff','CapBnd')):raise RuntimeError('Agent has unexpected capabilities')
+        answer=exchange({'operation':'verify'})
+        if answer.get('profile')!='isolated-net-raw-v1':raise RuntimeError('Worker verification failed')
+        answer.update({'uid':1000,'agent_no_new_privileges':True,'agent_capabilities':state})
+        print(json.dumps(answer));return 0
+    parser=argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-n',action='store_true');parser.add_argument('-q',type=int,default=10);parser.add_argument('-m',type=int,default=20);parser.add_argument('-N',type=int,default=1);parser.add_argument('-t',type=int,default=184)
+    methods=parser.add_mutually_exclusive_group(required=True);methods.add_argument('-U',action='store_true');methods.add_argument('-I',action='store_true')
+    parser.add_argument('--sport',type=int,default=65001);parser.add_argument('-p',type=int,default=65000);parser.add_argument('-w',type=float,default=.5);parser.add_argument('peer');parser.add_argument('packet_bytes',type=int)
+    args=parser.parse_args()
+    if not args.n or args.N!=1 or args.t!=184 or args.p!=65000 or args.packet_bytes!=100:raise ValueError('Unqualified traceroute options')
+    answer=exchange({'operation':'trace','method':'udp' if args.U else 'icmp','peer':peer(args.peer),'queries':args.q,'hops':args.m,'wait':args.w,'sport':args.sport})
+    if type(answer.get('exit')) is not int or not 0<=answer['exit']<=255 or not isinstance(answer.get('stdout'),str) or not isinstance(answer.get('stderr'),str):raise RuntimeError('Invalid diagnostic result')
+    sys.stdout.write(answer['stdout']);sys.stderr.write(answer['stderr']);return answer['exit']
+
+if __name__=='__main__':
+    try:
+        if sys.argv[1:]==['--serve']:serve()
+        else:sys.exit(proxy())
+    except Exception as error:
+        print('Isolated diagnostic unavailable: '+type(error).__name__,file=sys.stderr);sys.exit(77)
+'''
 
 LEGACY_OBSERVER = '#!/usr/bin/env python3\n"""Read-only status adapter for a hash-qualified legacy Agent; SIP engine unchanged."""\nimport hashlib\nimport importlib.util\nimport os\nfrom pathlib import Path\nimport sys\nimport threading\nimport time\n\nsource=Path(sys.argv[1]).resolve()\nallowed=ALLOWED_HASHES\nif hashlib.sha256(source.read_bytes()).hexdigest() not in allowed:\n    raise SystemExit(\'Version historique non qualifiée ; démarrage refusé sans modifier les données.\')\nsys.path.insert(0,str(source.parent))\nspec=importlib.util.spec_from_file_location(\'qualified_legacy_agent\',source)\nmodule=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)\noriginal_registration=module.ProbeAccount.onRegState\n\ndef observed_registration(account,parameter):\n    original_registration(account,parameter)\n    try:account._management_registration_active=bool(account.getInfo().regIsActive) and parameter.code==200\n    except module.pj.Error:account._management_registration_active=False\n\nmodule.ProbeAccount.onRegState=observed_registration\nagent=module.Agent()\n\ndef export():\n    while agent.running:\n        try:\n            status=agent.snapshot()\n            accounts={a.config[\'id\']:a for a in list(agent.accounts.values())}\n            for row in status.get(\'accounts\',[]):\n                row[\'registration_active\']=getattr(accounts.get(row[\'id\']),\'_management_registration_active\',False)\n            status.update({\'pid\':os.getpid(),\'sampled_at\':time.time(),\'prepared_calls\':len(agent.prepared),\'maintenance\':{\'protocol\':0,\'paused\':False,\'nonce\':None}})\n            module.atomic_json(agent.data/\'.management-status.json\',status)\n        except (OSError,ValueError):pass\n        time.sleep(1)\n\nthreading.Thread(target=export,daemon=True).start()\nagent.run()\n'
 FREEZE_WATCHDOG = "import os,sys,time,signal\nfrom pathlib import Path\npid,expected,manager,owner_expected=sys.argv[1:]\ndef marker(pid):\n    try:return Path('/proc/'+pid+'/stat').read_text().rsplit(') ',1)[1].split()[19]\n    except (OSError,IndexError):return None\nwhile marker(pid)==expected:\n    if marker(manager)!=owner_expected:\n        try:os.kill(int(pid),signal.SIGCONT)\n        except ProcessLookupError:pass\n        break\n    time.sleep(.2)\n"
@@ -313,6 +452,10 @@ def network_diagnostics(version):
     return version in ('0.9-024','0.9-025','0.9-026')
 
 
+def docker_network_diagnostics(version):
+    return bool(re.fullmatch(r'0\.9-\d{3}',version or '') and int(version[4:])>=24)
+
+
 class Native:
     def __init__(self, manager):
         self.m=manager;self.unit='voiceprobe-agent'+('' if manager.args.instance=='default' else '-'+manager.args.instance)+'.service'
@@ -378,11 +521,14 @@ class Container:
             labels=item['Config'].get('Labels') or {}
             need(labels.get('net.wifx.project')=='voiceprobe-agent' and labels.get('net.wifx.instance')==self.m.args.instance,
                  'Conteneur homonyme appartenant à une installation inconnue ; aucune modification.')
-            caps=item['HostConfig'].get('CapAdd') or []
+            caps=[value.removeprefix('CAP_') for value in item['HostConfig'].get('CapAdd') or []]
             need(item['HostConfig'].get('NetworkMode')=='host' and not item['HostConfig'].get('Privileged')
                  and caps in ([],['NET_RAW']) and not item['HostConfig'].get('PortBindings'),
                  'Mode réseau/privilèges Docker modifiés hors contrat ; aucune substitution.')
-            need(all(v['Type']=='bind' and v['Destination']=='/var/lib/voiceprobe' or v['Type']=='tmpfs' and v['Destination']=='/tmp' for v in item['Mounts']),
+            owned_mounts={str(self.m.code/'network-code'):'/opt/voiceprobe-network',str(self.m.code/'network-socket'):'/run/voiceprobe-network'}
+            need(all(v['Type']=='bind' and v['Destination']=='/var/lib/voiceprobe'
+                     or v['Type']=='tmpfs' and v['Destination']=='/tmp'
+                     or v['Type']=='bind' and owned_mounts.get(v.get('Source'))==v['Destination'] and v.get('RW') is False for v in item['Mounts']),
                  'Montage Docker supplémentaire non qualifié ; aucune ressource étrangère modifiée.')
             need(any(v['Type']=='bind' and v['Source']==str(self.m.data) and v['Destination']=='/var/lib/voiceprobe' for v in item['Mounts']),
                  'Persistance Docker différente de l’instance ; aucune modification.')
@@ -433,11 +579,24 @@ class Container:
             hostname=self.engine.call('GET','/info').get('Name','voiceprobe')
             config['Hostname']=(re.sub('[^A-Za-z0-9-]','-',hostname)+'-'+self.m.args.instance)[:63]
         if declaration.get('network_diagnostics'):
+            self.start_network(declaration['local_image_id'])
             host=config['HostConfig']
             host['CapDrop']=['ALL']
-            host['CapAdd']=['NET_RAW']
+            host['CapAdd']=[]
             host['SecurityOpt']=[option for option in (host.get('SecurityOpt') or [])
-                                 if not option.startswith('no-new-privileges:')]+['no-new-privileges:false']
+                                 if option.split('=',1)[0].split(':',1)[0]!='no-new-privileges']+['no-new-privileges:true']
+            host['ReadonlyRootfs']=True
+            config['User']='1000:1000'
+            config['Labels']['net.wifx.network-profile']=DOCKER_NETWORK_PROFILE
+            host['Binds'] += [str(self.m.code/'network-code')+':/opt/voiceprobe-network:ro',str(self.m.code/'network-socket')+':/run/voiceprobe-network:ro']
+            environment=config.get('Env') or []
+            image=self.engine.call('GET','/images/'+declaration['local_image_id']+'/json')
+            defaults=image.get('Config',{}).get('Env') or []
+            path=next((v[5:] for v in environment if v.startswith('PATH=')),next((v[5:] for v in defaults if v.startswith('PATH=')),'/usr/bin:/bin'))
+            path=':'.join(p for p in path.split(':') if p!='/opt/voiceprobe-network/bin')
+            config['Env']=[v for v in environment if not v.startswith('PATH=')]+['PATH=/opt/voiceprobe-network/bin:'+path]
+        elif (prior or {}).get('config',{}).get('Labels',{}).get('net.wifx.network-profile')!=DOCKER_NETWORK_PROFILE:
+            self.remove_network()
         if 'Healthcheck' not in config:
             check="""import json,os,time,urllib.request,ssl,sys
 try:
@@ -466,54 +625,106 @@ except Exception:
         item['Config']['Env']=[value for value in item['Config'].get('Env',[]) if value not in defaults]
         labels=original_image.get('Config',{}).get('Labels') or {}
         return {'local_image_id':item['Image'],'was_running':item['State']['Running'],
-                'network_diagnostics':False,
+                'network_diagnostics':item['Config'].get('Labels',{}).get('net.wifx.network-profile')==DOCKER_NETWORK_PROFILE,
                 'config':{k:item['Config'][k] for k in keys if k in item['Config']},
                 'host':{k:item['HostConfig'][k] for k in host_keys if k in item['HostConfig']}}
 
+    def network_container(self):
+        item=self.engine.call('GET','/containers/voiceprobe-agent-network-'+self.m.args.instance+'/json')
+        if item:
+            labels=item['Config'].get('Labels') or {}
+            need(labels.get('net.wifx.project')=='voiceprobe-agent-network' and labels.get('net.wifx.instance')==self.m.args.instance,
+                 'Auxiliaire de diagnostic homonyme étranger ; aucune modification.')
+            need(all(v.get('Destination')=='/var/lib/voiceprobe' and v.get('RW') is False for v in item.get('Mounts',[]) if v.get('Type')=='tmpfs'),
+                 'Montage temporaire de l’auxiliaire inconnu ; aucune modification.')
+            mounts={(v.get('Source'),v.get('Destination'),v.get('RW')) for v in item.get('Mounts',[]) if v.get('Type')!='tmpfs'}
+            need(mounts=={(str(self.m.code/'network-code'),'/opt/voiceprobe-network',False),(str(self.m.code/'network-socket'),'/run/voiceprobe-network',True)},
+                 'Montages de l’auxiliaire inconnus ; aucune modification.')
+        return item
+
+    def remove_network(self):
+        item=self.network_container()
+        if item:
+            if item['State']['Running']:self.engine.call('POST','/containers/'+item['Id']+'/stop?t=2')
+            self.engine.call('DELETE','/containers/'+item['Id']+'?v=false&force=false')
+
+    def start_network(self,image_id):
+        directory=safe_directory(self.m.code/'network-code'/'bin',create=True)
+        need(self.m.code.stat().st_uid==0 and not self.m.code.stat().st_mode&0o022,'Code du diagnostic root non modifiable par l’Agent requis.')
+        for path in (directory.parent,directory):
+            need(path.stat().st_uid==0 and not path.stat().st_mode&0o022,'Code diagnostic non sûr.')
+            path.chmod(0o755)
+        program=directory/'traceroute';expected=hashlib.sha256(DOCKER_NETWORK_PROGRAM.encode()).hexdigest()
+        need(not program.is_symlink() and (not program.exists() or program.stat().st_uid==0 and not program.stat().st_mode&0o022),'Programme diagnostic non sûr.')
+        if not program.exists() or digest(program)!=expected:
+            temporary=directory/'traceroute.new';need(not temporary.is_symlink(),'Programme temporaire symbolique refusé.')
+            temporary.write_text(DOCKER_NETWORK_PROGRAM);temporary.chmod(0o755);os.replace(temporary,program)
+        sockets=safe_directory(self.m.code/'network-socket',create=True)
+        need(sockets.stat().st_uid==0,'Répertoire de socket diagnostic non sûr.')
+        os.chown(sockets,0,1000);sockets.chmod(0o750)
+        item=self.network_container()
+        if item and not self.network_worker_matches(item,image_id,expected):
+            self.remove_network();item=None
+        if not item:
+            name='voiceprobe-agent-network-'+self.m.args.instance
+            config={'Image':image_id,'User':'0:1000','Entrypoint':['/usr/bin/python3'],'Cmd':['/opt/voiceprobe-network/bin/traceroute','--serve'],
+                    'Env':['PATH=/usr/bin:/bin','PYTHONPATH=','PYTHONDONTWRITEBYTECODE=1','PYTHONUNBUFFERED=1'],'Healthcheck':{'Test':['NONE']},
+                    'Labels':{'net.wifx.project':'voiceprobe-agent-network','net.wifx.instance':self.m.args.instance,'net.wifx.network-code':expected},
+                    'HostConfig':{'NetworkMode':'host','RestartPolicy':{'Name':'unless-stopped'},'ReadonlyRootfs':True,'Init':True,
+                                  'CapDrop':['ALL'],'CapAdd':['NET_RAW'],'SecurityOpt':['no-new-privileges:true'],
+                                  'Tmpfs':{'/var/lib/voiceprobe':'ro,nosuid,nodev,noexec,size=4096'},
+                                  'Binds':[str(directory.parent)+':/opt/voiceprobe-network:ro',str(sockets)+':/run/voiceprobe-network:rw'],
+                                  'LogConfig':{'Type':'json-file','Config':{'max-size':'1m','max-file':'2'}}}}
+            result=self.engine.call('POST','/containers/create?name='+name,config)
+            need(result and result.get('Id'),'Création de l’auxiliaire diagnostic refusée.')
+            self.engine.call('POST','/containers/'+result['Id']+'/start')
+        elif not item['State']['Running']:self.engine.call('POST','/containers/'+item['Id']+'/start')
+        for _ in range(30):
+            if (sockets/'diagnostics.sock').is_socket():return
+            time.sleep(.1)
+        raise Failure('Auxiliaire diagnostic non prêt ; aucune mise à jour vérifiée.')
+
+    def network_worker_matches(self,worker,image_id,expected):
+        host=worker['HostConfig'];security=[v.replace('=',':') for v in host.get('SecurityOpt') or []]
+        return (worker['Image']==image_id and worker['Config'].get('User')=='0:1000'
+                and worker['Config'].get('Entrypoint')==['/usr/bin/python3']
+                and worker['Config'].get('Cmd')==['/opt/voiceprobe-network/bin/traceroute','--serve']
+                and host.get('ReadonlyRootfs') and not host.get('Privileged') and host.get('NetworkMode')=='host'
+                and host.get('CapDrop')==['ALL'] and [v.removeprefix('CAP_') for v in host.get('CapAdd') or []]==['NET_RAW']
+                and bool({'no-new-privileges','no-new-privileges:true'}.intersection(security)) and 'no-new-privileges:false' not in security
+                and host.get('Tmpfs',{}).get('/var/lib/voiceprobe')=='ro,nosuid,nodev,noexec,size=4096'
+                and worker['Config'].get('Labels',{}).get('net.wifx.network-code')==expected)
+
+    def network_profile_matches(self):
+        item=self.inspect()
+        if not item:return False
+        host=item['HostConfig'];security=[v.replace('=',':') for v in host.get('SecurityOpt') or []]
+        worker=self.network_container()
+        if not worker:return False
+        expected=hashlib.sha256(DOCKER_NETWORK_PROGRAM.encode()).hexdigest()
+        mounts={(v.get('Source'),v.get('Destination'),v.get('RW')) for v in item.get('Mounts',[])}
+        return (item['Config'].get('User')=='1000:1000' and host.get('ReadonlyRootfs') and host.get('CapDrop')==['ALL'] and not host.get('CapAdd')
+                and bool({'no-new-privileges','no-new-privileges:true'}.intersection(security)) and 'no-new-privileges:false' not in security
+                and item['Config'].get('Labels',{}).get('net.wifx.network-profile')==DOCKER_NETWORK_PROFILE
+                and any(v.startswith('PATH=/opt/voiceprobe-network/bin:') for v in item['Config'].get('Env',[]))
+                and {(str(self.m.code/'network-code'),'/opt/voiceprobe-network',False),(str(self.m.code/'network-socket'),'/run/voiceprobe-network',False)}<=mounts
+                and worker['State']['Running'] and self.network_worker_matches(worker,item['Image'],expected)
+                and (self.m.code/'network-code/bin/traceroute').is_file() and digest(self.m.code/'network-code/bin/traceroute')==expected)
+
     def verify_network_profile(self):
+        self.m.settings.pop('network_profile_verified',None)
         info=self.engine.call('GET','/info') or {}
         need(not any('rootless' in option.lower() for option in info.get('SecurityOptions',[])),
              'Docker rootless non qualifié pour ce profil réseau ; aucune annonce de succès vérifié.')
-        item=self.inspect();host=item['HostConfig']
-        caps=[v.removeprefix('CAP_') for v in host.get('CapAdd') or []]
-        security=[v.replace('=',':') for v in host.get('SecurityOpt') or []]
-        need(item['Config'].get('User')=='1000:1000' and host.get('ReadonlyRootfs')
-             and host.get('CapDrop')==['ALL'] and caps==['NET_RAW']
-             and 'no-new-privileges:true' not in security,
-             'Profil réseau Docker non conforme : UID 1000, racine en lecture seule et seul NET_RAW requis ; succès refusé.')
-        code=r"""import json,os,re,subprocess,time
-from pathlib import Path
-assert os.geteuid()==1000
-status=dict(line.split(':',1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
-assert int(status['CapBnd'],16)==1<<13 and int(status['CapEff'],16)&~(1<<13)==0
-assert int(status['NoNewPrivs'])==0
-binary='/usr/bin/traceroute.db'
-assert 'cap_net_raw=ep' in subprocess.check_output(['getcap',binary],text=True)
-methods={};executable_caps={}
-for name,flag in [('udp','-U'),('icmp','-I')]:
- process=subprocess.Popen([binary,flag,'-n','-q','3','-N','1','-z','0.1','-m','1','-w','1','127.0.0.1','100'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
- observed=set();deadline=time.monotonic()+5
- while process.poll() is None and time.monotonic()<deadline:
-  try:
-   if Path('/proc/'+str(process.pid)+'/comm').read_text().strip().startswith('traceroute'):
-    child=dict(line.split(':',1) for line in Path('/proc/'+str(process.pid)+'/status').read_text().splitlines() if ':' in line)
-    observed.add(int(child['CapEff'],16))
-  except OSError:pass
-  time.sleep(.005)
- stdout,stderr=process.communicate(timeout=1)
- assert process.returncode==0 and re.search(r'^\s*1\s+127\.0\.0\.1\s',stdout,re.M),name
- assert 1<<13 in observed and all(v & ~(1<<13)==0 for v in observed),(name,sorted(observed))
- methods[name]=True
- executable_caps[name]=sorted(observed)
-print(json.dumps({'profile':'udp-icmp-net-raw-v1','uid':1000,'bounding_set':status['CapBnd'].strip(),'effective':status['CapEff'].strip(),'executable_effective':executable_caps,'no_new_privileges':False,'file_capability':'cap_net_raw=ep','loopback':methods}))
-"""
+        need(self.network_profile_matches(),'Profil réseau Docker non conforme : Agent UID1000 sans capacités et auxiliaire isolé NET_RAW, tous deux protégés par no-new-privileges ; succès refusé.')
+        item=self.inspect()
         execution=self.engine.call('POST','/containers/'+item['Id']+'/exec',
-                                   {'AttachStdout':True,'AttachStderr':True,'User':'1000:1000','Cmd':['python3','-c',code]})
+                                   {'AttachStdout':True,'AttachStderr':True,'User':'1000:1000','Cmd':['/opt/voiceprobe-network/bin/traceroute','--vp-verify']})
         need(execution and re.fullmatch('[a-f0-9]{64}',execution.get('Id','')),'Contrôle des permissions Docker indisponible.')
         output=self.engine.call('POST','/exec/'+execution['Id']+'/start',{'Detach':False,'Tty':False},raw=True)
         state=self.engine.call('GET','/exec/'+execution['Id']+'/json')
         need(state and state.get('ExitCode')==0 and not state.get('Running'),
-             'Permissions effectives UDP/ICMP refusées sous UID 1000 ; contrôler NET_RAW, le binaire et no-new-privileges. Aucun succès vérifié.')
+             'Diagnostics UDP/ICMP isolés non vérifiés : contrôler PR_GET_NO_NEW_PRIVS, NET_RAW effectif et le socket. Aucun succès vérifié.')
         payload=b'';offset=0
         while offset<len(output):
             need(len(output)-offset>=8,'Réponse de contrôle Docker tronquée.')
@@ -522,7 +733,9 @@ print(json.dumps({'profile':'udp-icmp-net-raw-v1','uid':1000,'bounding_set':stat
             payload+=output[offset:offset+size];offset+=size
         try:proof=json.loads(payload)
         except (ValueError,UnicodeError):raise Failure('Preuve des permissions Docker invalide.') from None
-        need(proof.get('profile')=='udp-icmp-net-raw-v1' and proof.get('loopback')=={'udp':True,'icmp':True},
+        need(proof.get('profile')==DOCKER_NETWORK_PROFILE and proof.get('uid')==1000 and proof.get('agent_no_new_privileges') is True
+             and proof.get('worker_no_new_privileges') is True and proof.get('no_new_privileges_source')=='prctl'
+             and proof.get('loopback')=={'udp':{'passed':True,'effective':[8192]},'icmp':{'passed':True,'effective':[8192]}},
              'Diagnostics locaux Docker non vérifiés.')
         self.m.settings['network_profile_verified']=proof
         return proof
@@ -796,6 +1009,7 @@ class Manager:
              'Docker rootless non qualifié pour ce profil réseau ; installation inchangée.')
         image=engine.call('GET','/images/'+urllib.parse.quote(declaration['reference'],safe='')+'/json')
         if image is None:
+            need(archive is not None,'Image signée locale absente ; retenter avec la distribution complète.')
             # Refuse archives that could load another project or a second image.
             with tarfile.open(archive,'r:gz') as source:
                 entry=source.extractfile('manifest.json');need(entry,'Manifeste Docker absent.')
@@ -809,7 +1023,7 @@ class Manager:
         labels=image.get('Config',{}).get('Labels') or {}
         need(labels.get('net.wifx.project')=='voiceprobe-agent' and labels.get('org.opencontainers.image.version')==manifest['version']
              and labels.get('org.opencontainers.image.revision')==manifest['source_revision'], 'Identité/version de l’image Agent non conforme.')
-        return {'local_image_id':image['Id'],'network_diagnostics':network_diagnostics(manifest['version'])}
+        return {'local_image_id':image['Id'],'network_diagnostics':docker_network_diagnostics(manifest['version'])}
 
     def available_rtp_base(self):
         # New installations only: avoid system services such as mDNS5353/LLMNR5355.
@@ -898,7 +1112,7 @@ m.atomic_json(p,c)
         self.password=password
         return True
 
-    def verify(self,manifest,expected_accounts=0,timeout=None,minimum_sample=0):
+    def verify(self,manifest,expected_accounts=0,timeout=None,minimum_sample=0,network_profile=True):
         deadline=time.monotonic()+(timeout or self.args.timeout)
         previous_cfg=private_json(self.cfg);adopted=previous_cfg.get('adoption_state')=='adopted'
         while time.monotonic()<deadline:
@@ -912,7 +1126,7 @@ m.atomic_json(p,c)
                     connection=http.client.HTTPSConnection(host,previous_cfg.get('port',18441),context=ssl.create_default_context(cafile=self.data_path(previous_cfg['tls_cert'])),timeout=3) if scheme=='https' else http.client.HTTPConnection(host,previous_cfg.get('port',18441),timeout=3)
                     connection.request('GET','/login');response=connection.getresponse();response.read();connection.close()
                     if response.status==200:
-                        if self.args.backend=='docker' and network_diagnostics(manifest['version']):self.backend.verify_network_profile()
+                        if network_profile and self.args.backend=='docker' and docker_network_diagnostics(manifest['version']):self.backend.verify_network_profile()
                         return status
                 except (OSError,ssl.SSLError):pass
             time.sleep(1)
@@ -1035,9 +1249,11 @@ exit 0
             if getattr(self.args,'requested_version',None):need(manifest['version']==self.args.requested_version,'Version demandée différente du manifeste signé actuel.')
             self.progress(2,'Architecture et manifeste signé vérifiés')
             installed=self.settings.get('release',{})
+            repair_profile=False
             if installed.get('release_id')==manifest['release_id']:
                 need(same_release(installed,manifest),'Contenu différent sous un identifiant de release immuable ; publication refusée.')
-                if self.backend.status():
+                repair_profile=self.args.backend=='docker' and docker_network_diagnostics(manifest['version']) and not self.backend.network_profile_matches()
+                if self.backend.status() and not repair_profile:
                     self.verify(manifest,self.expected_accounts())
                     if self.args.check:
                         print('CONTRÔLE OK : installation courante vérifiée ; aucun changement.')
@@ -1049,7 +1265,7 @@ exit 0
                 runtime=manifest.get('runtimes',{}).get(platform_key)
                 need(runtime,'Aucun binaire PJSUA2 qualifié pour cette plateforme ; arrêt sans compilation.')
                 wanted=[manifest['agent'],runtime]
-            else:wanted=[manifest['docker']]
+            else:wanted=[] if repair_profile else [manifest['docker']]
             total=sum(v['bytes'] for v in wanted)
             persistent=sum(p.stat().st_size for p in self.data.rglob('*') if p.is_file() and not p.is_symlink()) if self.data.exists() else 0
             self.free_space(total*4+int(persistent*1.1))
@@ -1077,10 +1293,10 @@ exit 0
             current=self.settings.get('release',{})
             if self.previous and self.args.backend=='native' and version=='0.9-003' and not current:
                 current=self.legacy_metadata(manifest)
-            if current.get('release_id')==manifest['release_id'] and self.backend.status():
+            if current.get('release_id')==manifest['release_id'] and self.backend.status() and not repair_profile:
                 self.verify(manifest,expected);print('DÉJÀ INSTALLÉ : contrôles effectués, identité et comptes conservés.')
                 return 'VERIFIED_SUCCESS'
-            prepared=self.prepare_native(manifest,artifacts[0],artifacts[1],runtime) if self.args.backend=='native' else self.prepare_docker(manifest,artifacts[0])
+            prepared=self.prepare_native(manifest,artifacts[0],artifacts[1],runtime) if self.args.backend=='native' else self.prepare_docker(manifest,artifacts[0] if artifacts else None)
             self.progress(4,'Nouvelle version préparée sans compilation')
             created=self.configure_new(prepared if self.args.backend=='native' else '',manifest)
             if self.args.reset_initial_password and original:
@@ -1107,19 +1323,26 @@ exit 0
                 self.progress(7,'Interface et connexion Controller vérifiées')
                 self.summary(manifest,status,created)
                 return 'VERIFIED_SUCCESS'
-            except BaseException:
+            except BaseException as rejected:
+                state['failure']=str(rejected)[:300] if isinstance(rejected,Failure) else type(rejected).__name__
+                atomic(self.state_path,state)
                 if self.frozen:
                     self.backend.thaw(self.frozen);self.frozen=None
                 (self.data/'.update-request.json').unlink(missing_ok=True)
                 if state['phase'] in ('stopped','backed_up','started') and self.previous:
                     if backup:self.verify_backup(backup)
-                    self.backend.restore(self.previous);state['phase']='rolled_back';atomic(self.state_path,state)
+                    self.backend.restore(self.previous)
                     need(self.backend.status()==self.previous.get('was_running',True),'Échec de reprise de l’état précédent ; données et sauvegarde conservées.')
-                    if current and self.previous.get('was_running',True):self.verify(current,expected)
+                    # Restore the captured historical service; never certify its old
+                    # network profile as a successful new installation or mask the first error.
+                    if current and self.previous.get('was_running',True):self.verify(current,expected,network_profile=False)
                     if original:need(self.persistent_proof()==original,'Données persistantes modifiées ; aucune restauration destructive automatique.')
+                    state['phase']='rolled_back';state['rollback_network_profile_certified']=False;atomic(self.state_path,state)
                     print('RETOUR À LA VERSION PRÉCÉDENTE : état de service initial rétabli, données et sauvegarde conservées.')
-                elif not self.previous and state['phase']=='started':
-                    self.backend.stop();state['phase']='failed_initial';atomic(self.state_path,state)
+                elif not self.previous and state['phase'] in ('backed_up','started'):
+                    self.backend.stop()
+                    if self.args.backend=='docker':self.backend.remove_network()
+                    state['phase']='failed_initial';atomic(self.state_path,state)
                 raise
             finally:
                 (self.data/'.update-request.json').unlink(missing_ok=True)
@@ -1200,6 +1423,7 @@ exit 0
         if state.get('phase') in ('prepared','stopped','backed_up','started'):
             if not state.get('previous'):
                 if self.backend.status():self.backend.stop()
+                if self.args.backend=='docker':self.backend.remove_network()
                 if 'settings_before' in state:
                     self.settings=state['settings_before']
                     if self.settings:atomic(self.settings_path,self.settings)
@@ -1227,7 +1451,7 @@ exit 0
                 if prior_release and state['previous'].get('was_running',True):
                     # systemctl start returns before the Agent publishes its first status.
                     # Never classify this startup interval as an unknown legacy Agent.
-                    self.verify(prior_release,state.get('expected_accounts',0),minimum_sample=restarted_after)
+                    self.verify(prior_release,state.get('expected_accounts',0),minimum_sample=restarted_after,network_profile=False)
                 state['phase']='recovered_previous';atomic(self.state_path,state)
                 print('Interruption détectée : version précédente vérifiée avant nouvelle tentative.')
             (self.data/'.update-request.json').unlink(missing_ok=True)

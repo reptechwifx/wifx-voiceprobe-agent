@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -247,7 +248,7 @@ class LocalSafety(unittest.TestCase):
         with self.assertRaises(m.Failure):m.safe_directory(link/'child')
 
     def test_foreign_docker_resources_are_never_modified(self):
-        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data')
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',code=self.root/'code')
         container=m.Container(manager);calls=[]
         foreign={'Config':{'Labels':{'net.wifx.project':'other-project'}},'HostConfig':{'NetworkMode':'host'},'Mounts':[]}
         container.engine=types.SimpleNamespace(call=lambda method,path,value=None: calls.append((method,path)) or foreign)
@@ -258,18 +259,22 @@ class LocalSafety(unittest.TestCase):
         self.assertTrue(all(method=='GET' for method,path in calls))
 
     def test_docker_024_network_capability_and_legacy_rollback(self):
-        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data')
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',code=self.root/'code')
         container=m.Container(manager);created=[]
         container.inspect=lambda:None
         container.capture=lambda:{'host':{'SecurityOpt':['no-new-privileges:true','seccomp=default'],
                                             'CapDrop':['ALL'],'CapAdd':[]}}
         container.engine=types.SimpleNamespace(call=lambda method,path,value=None:
             created.append(value) or {'Id':'test-container'} if method=='POST' else {'Name':'lab'})
+        container.start_network=lambda image:None
+        container.remove_network=lambda:None
         container.start({'local_image_id':'sha256:new','network_diagnostics':True},start=False)
         host=created[-1]['HostConfig']
         self.assertEqual(['ALL'],host['CapDrop'])
-        self.assertEqual(['NET_RAW'],host['CapAdd'])
-        self.assertEqual(['seccomp=default','no-new-privileges:false'],host['SecurityOpt'])
+        self.assertEqual([],host['CapAdd'])
+        self.assertEqual('1000:1000',created[-1]['User'])
+        self.assertTrue(host['ReadonlyRootfs'])
+        self.assertEqual(['seccomp=default','no-new-privileges:true'],host['SecurityOpt'])
         created.clear()
         container.start({'local_image_id':'sha256:old','network_diagnostics':False},start=False)
         legacy=created[-1]['HostConfig']
@@ -280,14 +285,18 @@ class LocalSafety(unittest.TestCase):
         self.assertTrue(m.network_diagnostics('0.9-025'))
         self.assertTrue(m.network_diagnostics('0.9-024'))
         self.assertFalse(m.network_diagnostics('0.9-021'))
+        self.assertTrue(m.docker_network_diagnostics('0.9-027'))
+        self.assertFalse(m.network_diagnostics('0.9-027'))
 
     def test_docker_verification_requires_effective_diagnostics_not_only_cap_add(self):
-        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',settings={})
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',code=self.root/'code',settings={})
         container=m.Container(manager)
         item={'Id':'agent-id','Config':{'User':'1000:1000'},'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'CapAdd':['NET_RAW'],'SecurityOpt':['no-new-privileges:false']}}
         container.inspect=lambda:item
         identifier='a'*64;calls=[]
-        proof={'profile':'udp-icmp-net-raw-v1','loopback':{'udp':True,'icmp':True}}
+        profile=[True]
+        container.network_profile_matches=lambda:profile[0]
+        proof={'profile':m.DOCKER_NETWORK_PROFILE,'uid':1000,'agent_no_new_privileges':True,'worker_no_new_privileges':True,'no_new_privileges_source':'prctl','loopback':{method:{'passed':True,'effective':[8192]} for method in ('udp','icmp')}}
         raw=json.dumps(proof).encode();frame=bytes([1,0,0,0])+len(raw).to_bytes(4,'big')+raw
         exit_code=[1];rootless=[False]
         def api(method,path,value=None,raw=False):
@@ -297,7 +306,7 @@ class LocalSafety(unittest.TestCase):
             if path.endswith('/start'):return frame
             return {'ExitCode':exit_code[0],'Running':False}
         container.engine=types.SimpleNamespace(call=api)
-        with self.assertRaisesRegex(m.Failure,'effectives'):container.verify_network_profile()
+        with self.assertRaisesRegex(m.Failure,'non vérifiés'):container.verify_network_profile()
         self.assertNotIn('network_profile_verified',manager.settings)
         exit_code[0]=0
         self.assertEqual(proof,container.verify_network_profile())
@@ -305,9 +314,10 @@ class LocalSafety(unittest.TestCase):
         rootless[0]=True
         with self.assertRaisesRegex(m.Failure,'rootless'):container.verify_network_profile()
         rootless[0]=False
-        for security,caps in [(['no-new-privileges:true'],['NET_RAW']),(['no-new-privileges:false'],[])]:
-            item['HostConfig'].update(SecurityOpt=security,CapAdd=caps)
-            with self.assertRaisesRegex(m.Failure,'non conforme'):container.verify_network_profile()
+        self.assertNotIn('network_profile_verified',manager.settings)
+        profile[0]=False
+        with self.assertRaisesRegex(m.Failure,'non conforme'):container.verify_network_profile()
+        self.assertEqual(['/opt/voiceprobe-network/bin/traceroute','--vp-verify'],next(value['Cmd'] for method,path,value in calls if path.endswith('/exec')))
 
     def manager(self):
         manager=m.Manager.__new__(m.Manager);manager.code=self.root/'code';manager.code.mkdir();manager.data=self.root/'data';manager.data.mkdir()
@@ -464,7 +474,7 @@ class JournalConsistency(unittest.TestCase):
             m.atomic(manager.state_path,{'phase':'started','previous':{'release':'prior-directory'},'settings_before':old})
             restored=[];manager.backend=types.SimpleNamespace(restore=restored.append)
             verified=[]
-            manager.verify=lambda release,expected,minimum_sample:verified.append((release,expected,minimum_sample))
+            manager.verify=lambda release,expected,minimum_sample,**options:verified.append((release,expected,minimum_sample))
             before=time.time();manager.recover()
             self.assertEqual([{'release':'prior-directory'}],restored)
             self.assertEqual(old,m.private_json(manager.settings_path));self.assertEqual(old,manager.settings)
@@ -474,7 +484,7 @@ class JournalConsistency(unittest.TestCase):
     def test_incomplete_first_install_does_not_keep_a_committed_success_catalog(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);manager=object.__new__(m.Manager);manager.data=root/'data';manager.data.mkdir()
-            manager.settings_path=root/'settings.json';manager.state_path=root/'operation.json';manager.settings={'release':{'release_id':'unverified'}}
+            manager.settings_path=root/'settings.json';manager.state_path=root/'operation.json';manager.settings={'release':{'release_id':'unverified'}};manager.args=types.SimpleNamespace(backend='native')
             m.atomic(manager.settings_path,manager.settings);m.atomic(manager.state_path,{'phase':'started','previous':None,'settings_before':{},'initial_install':True})
             stopped=[];manager.backend=types.SimpleNamespace(status=lambda:True,stop=lambda:stopped.append(True))
             manager.recover()
@@ -536,3 +546,42 @@ class IncomingRollbackCompatibility(unittest.TestCase):
                 manager.assert_legacy_rollback_reports({'version':'0.9-004'})
             with sqlite3.connect(manager.data/'state.sqlite') as db:db.execute('DELETE FROM reports')
             manager.assert_legacy_rollback_reports({'version':'0.9-004'})
+
+
+class DockerNetworkWorker(unittest.TestCase):
+    def setUp(self):
+        self.worker={'__name__':'qualified_worker'}
+        exec(compile(m.DOCKER_NETWORK_PROGRAM,'signed-network-worker','exec'),self.worker)
+
+    def test_legacy_proc_without_no_new_privs_uses_kernel_api(self):
+        original=Path.read_text
+        def legacy(path,*args,**kwargs):
+            data=original(path,*args,**kwargs)
+            return '\n'.join(line for line in data.splitlines() if not line.startswith('NoNewPrivs:'))
+        for kernel in ('3.10.108','4.4.302+'):
+            with self.subTest(proc_layout=kernel),patch.object(Path,'read_text',legacy):
+                self.assertIn('CapEff',self.worker['process_state']())
+                self.assertIsInstance(self.worker['no_new_privileges'](),bool)
+        # Verify true in a fresh child without changing this test process.
+        code=m.DOCKER_NETWORK_PROGRAM.split("if __name__=='__main__':")[0]
+        result=subprocess.run([sys.executable,'-c',code+"\nassert ctypes.CDLL(None).prctl(38,1,0,0,0)==0;assert no_new_privileges() is True"],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+        with patch.object(self.worker['ctypes'],'CDLL',return_value=types.SimpleNamespace(prctl=lambda *args:-1)):
+            with self.assertRaises(OSError):self.worker['no_new_privileges']()
+
+    def test_worker_refuses_unbounded_or_arbitrary_commands(self):
+        request={'operation':'trace','method':'udp','peer':'127.0.0.1','queries':10,'hops':20,'wait':.5,'sport':65001}
+        with patch.object(self.worker['subprocess'],'Popen') as spawn:
+            for update in ({'method':'shell'},{'peer':'127.0.0.1;id'},{'peer':'224.0.0.1'},{'queries':11},{'hops':21},{'wait':60},{'sport':22},{'command':'id'}):
+                with self.subTest(update=update),self.assertRaises(ValueError):self.worker['trace']({**request,**update})
+            spawn.assert_not_called()
+
+    def test_worker_profile_refuses_extra_capabilities_or_disabled_protection(self):
+        manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'))
+        backend=m.Container(manager)
+        item={'Image':'signed-image','Config':{'User':'0:1000','Entrypoint':['/usr/bin/python3'],'Cmd':['/opt/voiceprobe-network/bin/traceroute','--serve'],'Labels':{'net.wifx.network-code':'hash'}},'HostConfig':{'ReadonlyRootfs':True,'Privileged':False,'NetworkMode':'host','CapDrop':['ALL'],'CapAdd':['CAP_NET_RAW'],'SecurityOpt':['no-new-privileges:true'],'Tmpfs':{'/var/lib/voiceprobe':'ro,nosuid,nodev,noexec,size=4096'}}}
+        self.assertTrue(backend.network_worker_matches(item,'signed-image','hash'))
+        for change in ({'CapAdd':['NET_RAW','NET_ADMIN']},{'Privileged':True},{'SecurityOpt':['no-new-privileges:false']},{'ReadonlyRootfs':False},{'Tmpfs':{}}):
+            with self.subTest(change=change):
+                altered=json.loads(json.dumps(item));altered['HostConfig'].update(change)
+                self.assertFalse(backend.network_worker_matches(altered,'signed-image','hash'))
