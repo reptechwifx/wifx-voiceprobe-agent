@@ -929,6 +929,7 @@ exit 0
         try:
             namespace=runpy.run_path(str(qualified),run_name='voiceprobe_verified_manager')
             manager=namespace['Manager'](self.args)
+            manager._verified_manager_sha256=digest(qualified)
         except Exception:
             raise Failure('Chargement du gestionnaire signé refusé ; aucune dépendance installée.') from None
         if getattr(self,'remote_operation',None):manager.remote_operation=self.remote_operation
@@ -945,7 +946,7 @@ exit 0
         with tempfile.TemporaryDirectory(prefix='voiceprobe-download-') as folder:
             folder=Path(folder)
             qualified=self.refresh_manager(source,folder,install=not self.args.check)
-            if digest(qualified)!=digest(Path(__file__)):
+            if getattr(self,'_verified_manager_sha256',None)!=digest(qualified):
                 return self.relay_update(qualified)
             # Management and application catalogs have separate signed lifecycles.
             source=self.source()

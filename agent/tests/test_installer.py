@@ -126,13 +126,22 @@ class Manager:
         digest=hashlib.sha256(raw).hexdigest()
         self.manager_catalog(manager='agent-manager-'+digest[:12]+'.py',manager_sha256=digest,manager_bytes=str(len(raw)))
         (self.root/('agent-manager-'+digest[:12]+'.py')).write_bytes(raw)
-        manager=m.Manager.__new__(m.Manager);manager.code=self.out;manager.settings={}
-        manager.args=types.SimpleNamespace(check=True,backend='native')
-        manager.source=lambda:self.source
-        manager.platform_key=lambda:(_ for _ in ()).throw(AssertionError('Old platform/dependency logic must not run'))
-        self.assertEqual('CHECK_OK',manager.update())
-        self.assertTrue(manager.settings['handoff_verified'])
-        self.assertFalse((self.out/'manager-state.json').exists())
+        for replace_running_file in (False,True):
+            with self.subTest(replace_running_file=replace_running_file):
+                running=self.out/'installed-manager.py';running.write_bytes(b'# original running manager\n')
+                manager=m.Manager.__new__(m.Manager);manager.code=self.out;manager.settings={}
+                manager.args=types.SimpleNamespace(check=not replace_running_file,backend='native')
+                manager.source=lambda:self.source
+                manager.platform_key=lambda:(_ for _ in ()).throw(AssertionError('Old platform/dependency logic must not run'))
+                def refresh(source,folder,install=True):
+                    qualified=m.Manager.refresh_manager(manager,source,folder,install=False)
+                    if replace_running_file:running.write_bytes(qualified.read_bytes())
+                    return qualified
+                manager.refresh_manager=refresh
+                with patch.object(m,'__file__',str(running)):
+                    self.assertEqual('CHECK_OK',manager.update())
+                self.assertTrue(manager.settings['handoff_verified'])
+                self.assertFalse((self.out/'manager-state.json').exists())
 
     def test_invalid_signature_replay_expiry_and_unqualified_schema(self):
         for changes in ({'sequence':0},{'expires':int(time.time())-1},{'data_schema':2},{'rollback_compatible':False},{'source_revision':'unknown'},{'installer_protocol':2}):
