@@ -1,8 +1,8 @@
 schema=1
-sequence=2026102007
-expires=1800268159
-manager=agent-manager-eb82390427ec.py
-manager_sha256=eb82390427ecb69fc81087b16c3734eb0c8e5e5c68aecc23195a5288db0ff76f
-manager_bytes=106122
-source_revision=b8aa44d25ec70a6bb6fe5893420dd90c9ba28946
-artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-025-installer-1.0.2
+sequence=2026102008
+expires=1800276373
+manager=agent-manager-ddc5d7e0a87e.py
+manager_sha256=ddc5d7e0a87ed4f3a6ed062e29e59e360154c8108f073cdde66701fae8a0fa81
+manager_bytes=107923
+source_revision=59ff8c290faa2b5772070937a3ccba7397d230da
+artifact_source=https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-026-installer-1.0.2

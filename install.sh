@@ -25,11 +25,13 @@ for bootstrap_arg in "$@"; do
  [ "$bootstrap_arg" != --check ] || bootstrap_check=1
 done
 case "$bootstrap_backend" in native|docker) ;; *) printf 'Mode non reconnu.\n' >&2; exit 1;; esac
-case "$(uname -m)" in x86_64|amd64) ;; *) printf 'AMD64 requis ; aucun binaire ARM qualifié.\n' >&2; exit 1;; esac
+bootstrap_cpu=$(uname -m)
+case "$bootstrap_cpu" in x86_64|amd64|aarch64|arm64) ;; *) printf 'Architecture CPU non qualifiée.\n' >&2; exit 1;; esac
 if [ "$bootstrap_backend" = native ]; then
  [ -r /etc/os-release ] || exit 1
  . /etc/os-release
- case "$ID:$VERSION_ID" in ubuntu:24.04|debian:12) ;; *) printf 'OS natif non qualifié ; aucun fallback par compilation.\n' >&2; exit 1;; esac
+ bootstrap_userspace=$(dpkg --print-architecture)
+ case "$bootstrap_cpu:$bootstrap_userspace:$ID:$VERSION_ID" in x86_64:amd64:ubuntu:24.04|amd64:amd64:ubuntu:24.04|x86_64:amd64:debian:12|amd64:amd64:debian:12|aarch64:arm64:debian:13|arm64:arm64:debian:13) ;; *) printf 'OS natif non qualifié ; aucun fallback par compilation.\n' >&2; exit 1;; esac
  [ -d /run/systemd/system ] || { printf 'systemd actif requis pour le mode natif.\n' >&2; exit 1; }
  if ! command -v python3 >/dev/null || ! command -v openssl >/dev/null || ! command -v curl >/dev/null; then
   [ "$bootstrap_check" -eq 0 ] || { printf 'Prérequis absents ; contrôle sans installation refusé.\n' >&2; exit 1; }
@@ -37,6 +39,7 @@ if [ "$bootstrap_backend" = native ]; then
   apt-get install -y --no-install-recommends python3 openssl ca-certificates curl >/dev/null
  fi
 else
+ case "$bootstrap_cpu" in x86_64|amd64) ;; *) printf 'Docker ARM64 non qualifié ; utiliser Debian13 ARM64 natif.\n' >&2; exit 1;; esac
  bootstrap_docker_cli=$(command -v docker || true)
  if [ -z "$bootstrap_docker_cli" ]; then
   for bootstrap_cli in /usr/local/bin/docker /var/packages/ContainerManager/target/usr/bin/docker /var/packages/Docker/target/usr/bin/docker; do

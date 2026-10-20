@@ -1,5 +1,25 @@
 # WIFX Voice Probe Agent
 
+## Bêta 0.9-026 — Debian 13 ARM64
+
+Même Agent Linux, même GUI sur le port **18441**, même installateur signé et même maintenance distante. La plateforme supplémentaire est Debian 13 64 bits / Python 3.13 / ARM64 (aarch64), pour Raspberry Pi 4. ARMHF et Docker ARM64 ne sont pas pris en charge. Aucun build n’est effectué sur la cible ; les dépendances Python sont fournies hors ligne avec leurs empreintes.
+
+Installation native :
+
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- install --strict
+```
+
+GUI locale : `http://IP_DU_RASPBERRY:18441`, selon les restrictions d’accès existantes. Le terminal remet les accès initiaux. Deuxième commande, pour autoriser les mises à jour depuis le Controller :
+
+```sh
+sudo voiceprobe-agent enable-remote-update --strict
+```
+
+Ensuite : **Voice Probe → Agents → Mettre à jour**. La signature du gestionnaire est vérifiée avant les dépendances ; identité, comptes SIP et données persistent. Le runtime PJSIP/PJSUA2 2.16 conserve `vp-rtcp-safe-v1` et `getVoiceProbeStats`. Les binaires AMD64 sont réutilisés et Windows 0.9-024 reste inchangé. La qualification matérielle Raspberry Pi reste distincte de la qualification LAB ARM64 ; consulter le rapport de livraison 026.
+
+
+
 ## Bêta 0.9-025 — Linux/Docker
 
 La maintenance normale se fait depuis **Voice Probe → Agents → Mettre à jour**.
@@ -19,6 +39,7 @@ les artefacts Windows 0.9-024 ne changent pas.
 | SYSTÈME | INSTALLATION | MISE À JOUR |
 |---|---|---|
 | Ubuntu 24.04 AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh` | `sudo voiceprobe-agent update` |
+| Debian 13 ARM64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh` | `sudo voiceprobe-agent update` |
 | Debian 12 AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh` | `sudo voiceprobe-agent update` |
 | Docker Linux AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
 | Synology Intel AMD64¹ | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh -s -- --backend docker` | `sudo voiceprobe-agent-docker update` |
@@ -33,7 +54,7 @@ Une commande, puis adoptez l’Agent dans votre Controller. **Agent Bêta 0.9-02
 
 ## Avant de commencer
 
-Ubuntu24.04/Python3.12 ou Debian12/Python3.11 AMD64, ou hôte Linux AMD64 avec Docker actif. DSM nécessite Docker/Container Manager, curl et OpenSSL accessibles ; le script recherche Docker dans les chemins des paquets DSM. Docker Compose et Python sur l’hôte Docker/DSM ne sont pas requis. Prévoir de l’espace pour la livraison, les données et les sauvegardes, et l’accès HTTPS à GitHub, ses CDN et au Controller. L’installation native utilise aussi les dépôts binaires officiels du système. Aucun compte GitHub/GitLab, token Registry, clone Git ou SCP n’est nécessaire.
+Ubuntu24.04/Python3.12 ou Debian12/Python3.11 AMD64, Debian13/Python3.13 ARM64 natif, ou hôte Linux AMD64 avec Docker actif. DSM nécessite Docker/Container Manager, curl et OpenSSL accessibles ; le script recherche Docker dans les chemins des paquets DSM. Docker Compose et Python sur l’hôte Docker/DSM ne sont pas requis. Prévoir de l’espace pour la livraison, les données et les sauvegardes, et l’accès HTTPS à GitHub, ses CDN et au Controller. L’installation native utilise aussi les dépôts binaires officiels du système. Aucun compte GitHub/GitLab, token Registry, clone Git ou SCP n’est nécessaire.
 
 Le Controller proposé est `https://vp.wifx.net`. Pour un autre Controller, renseigner son adresse HTTPS avec l’option `--controller` ; ne jamais désactiver TLS. L’identité est générée localement. L’Agent apparaît en attente d’adoption ; aucun token d’enrôlement à recopier. Le dépôt distribue uniquement l’Agent, sans Controller ni PostgreSQL.
 
@@ -146,7 +167,7 @@ Sources originales Agent et outillage : [GPL-3.0-or-later](LICENSE). Les composa
 
 Pour retirer l’Agent du service sans détruire ses données, terminer les appels puis désactiver/arrêter uniquement son service systemd ou son conteneur, selon le guide de diagnostic. L’effacement des identités/volumes n’est pas une opération de mise à jour.
 
-Plateformes non qualifiées : Ubuntu22.04, autres Debian, ARM64, NAS Synology physique et réseau IPv6 réel. SIP TLS n’est pas annoncé qualifié par les essais UDP/TCP. Temps observés en LAB : Ubuntu286s, Debian182s, Docker avec daemon vierge35s ; ils dépendent du réseau, des dépôts système et du matériel. Aucun test n’a utilisé un Controller WIFX, une sonde ou un NAS de production.
+Plateformes non qualifiées : Ubuntu22.04, autres Debian, ARMHF, Docker ARM64, Raspberry Pi physique et NAS Synology physique et réseau IPv6 réel. SIP TLS n’est pas annoncé qualifié par les essais UDP/TCP. Temps observés en LAB : Ubuntu286s, Debian182s, Docker avec daemon vierge35s ; ils dépendent du réseau, des dépôts système et du matériel. Aucun test n’a utilisé un Controller WIFX, une sonde ou un NAS de production.
 
 
 ### Stabilité et mises à jour008
