@@ -40,6 +40,32 @@ Les données, identités et credentials sont séparés des binaires : `/opt/voic
 
 ## Mise à jour et exploitation
 
+### Correctif de maintenance distante 0.9-024
+
+L'état « À jour » décrit la version active confirmée ; les tentatives distantes
+restent dans leur historique. Une mise à jour manuelle ne valide pas une ancienne
+tentative distante échouée.
+
+Le gestionnaire historique 021 ne sait pas remplacer son code avant de vérifier
+les nouvelles dépendances. Un administrateur autorisé prépare une seule fois le
+gestionnaire signé et son service de maintenance, sans réinstaller l'Agent :
+
+```sh
+curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh | sudo sh -s -- update-manager --strict
+```
+
+Pour une instance Docker gérée, ajouter `--backend docker` et reprendre ses
+options `--data-root` et `--instance`. Exiger
+`VOICEPROBE_AGENT_RESULT=MANAGER_VERIFIED`, puis utiliser « Agents → Mettre à
+jour » dans le Controller. Cette préparation ne prétend pas que l'Agent a été
+mis à jour. Les anciens gestionnaires installés avec r2 doivent aussi être
+préparés pour les futures dépendances : leur moteur déjà en 0.9-024 ne sera pas
+réinstallé. Le gestionnaire vérifie ensuite `manager.manifest` et `manager.sig`
+avec la clé déjà approuvée, avant les dépendances de la distribution Agent.
+L'identité, les comptes, la configuration et les historiques ne sont pas
+réinitialisés. Sans autorisation administrative initiale, aucun contournement
+ni mot de passe root n'est demandé par l'Agent.
+
 Pour la transition native **0.9-021 → 0.9-024**, l'ancien gestionnaire peut afficher
 « Dépendances non qualifiées ; aucun paquet arbitraire installé. » Il refuse les
 nouveaux paquets `traceroute` et `libcap2-bin` avant de pouvoir se remplacer.
