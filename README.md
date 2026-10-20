@@ -1,5 +1,21 @@
 # WIFX Voice Probe Agent
 
+## Bêta 0.9-025 — Linux/Docker
+
+La maintenance normale se fait depuis **Voice Probe → Agents → Mettre à jour**.
+Le gestionnaire signé est chargé avant les dépendances qualifiées, puis la version
+et la reconnexion sont vérifiées. Un Agent déjà à jour n'est pas réinstallé.
+Le gestionnaire historique peut nécessiter une préparation administrative unique
+`install.sh update-manager --strict`, sans réinstallation de l'Agent.
+
+Le profil Docker conserve UID 1000, réseau host, racine en lecture seule et
+`cap_drop: ALL`. Seul `NET_RAW` est permis au binaire de diagnostic ; ses capacités
+effectives et ses réponses UDP/ICMP sont contrôlées avant succès. Aucun mode
+privilégié ni `NET_ADMIN`. Le profil Synology AMD64 est un essai LAB, sans NAS
+physique ; Docker rootless reste hors qualification. Le moteur SIP/RTP/DTMF et
+les artefacts Windows 0.9-024 ne changent pas.
+
+
 | SYSTÈME | INSTALLATION | MISE À JOUR |
 |---|---|---|
 | Ubuntu 24.04 AMD64 | `curl -fsS https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/install.sh \| sudo sh` | `sudo voiceprobe-agent update` |
