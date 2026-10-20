@@ -153,6 +153,9 @@ CMD ["python3","agent/src/main.py"]
     (out/'release.json').write_text(json.dumps(manifest,indent=2)+'\n');sign(args.signing_key,out/'release.json',out/'release.sig')
     public=run(['openssl','pkey','-in',str(args.signing_key),'-pubout']).decode().strip();(out/'signing-public.pem').write_text(public+'\n')
     manager=out/manager_name;shutil.copy2(ROOT/'agent/installer/manage.py',manager)
+    manager_spec=importlib.util.spec_from_file_location('manager_package',ROOT/'scripts/package-agent-manager.py')
+    manager_package=importlib.util.module_from_spec(manager_spec);manager_spec.loader.exec_module(manager_package)
+    manager_package.write_catalog(out,manager,revision,args.sequence,manifest['expires'],args.artifact_source,args.signing_key)
     bootstrap_manifest='schema=1\nexpires='+str(manifest['expires'])+'\ndocker_id1='+image['Id']+'\ndocker_id2='+config_id+'\nmanager='+manager.name+'\nmanager_sha256='+sha(manager)+'\ndocker='+docker_archive.name+'\ndocker_sha256='+sha(docker_archive)+'\ndocker_reference='+ref+'\n'
     if args.artifact_source:bootstrap_manifest+='artifact_source='+args.artifact_source+'\n'
     (out/'bootstrap.manifest').write_text(bootstrap_manifest);sign(args.signing_key,out/'bootstrap.manifest',out/'bootstrap.sig')

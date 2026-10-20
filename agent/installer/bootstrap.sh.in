@@ -64,7 +64,7 @@ VOICEPROBE_PUBLIC_KEY
 bootstrap_artifact_base=''
 bootstrap_fetch() {
  bootstrap_origin=$bootstrap_base
- case "$1" in bootstrap.manifest|bootstrap.sig) ;; *) [ -z "$bootstrap_artifact_base" ] || bootstrap_origin=$bootstrap_artifact_base;; esac
+ case "$1" in bootstrap.manifest|bootstrap.sig|manager.manifest|manager.sig) ;; *) [ -z "$bootstrap_artifact_base" ] || bootstrap_origin=$bootstrap_artifact_base;; esac
  bootstrap_url=$bootstrap_origin/$1
  bootstrap_hops=0
  while :; do
@@ -128,10 +128,48 @@ done
 for bootstrap_file in "$bootstrap_manager" "$bootstrap_image"; do
  case "$bootstrap_file" in ''|*[!A-Za-z0-9_.-]*|.*) printf 'Nom de fichier refusé.\n' >&2; exit 1;; esac
 done
-case "${1-}" in install|update|status|diagnose|rollback|version|help) ;; *) set -- install "$@";; esac
+# The application image remains unchanged when only its root manager is repaired.
+bootstrap_fetch manager.manifest "$bootstrap_temp/manager.manifest" 16384
+bootstrap_fetch manager.sig "$bootstrap_temp/manager.sig" 4096
+openssl dgst -sha256 -verify "$bootstrap_temp/signing.pem" -signature "$bootstrap_temp/manager.sig" "$bootstrap_temp/manager.manifest" >/dev/null
+bootstrap_seen=':'; bootstrap_manager_sequence=''; bootstrap_manager_revision=''; bootstrap_manager_bytes=''; bootstrap_manager_expires=''; bootstrap_manager_schema=''; bootstrap_manager_origin=''
+while IFS='=' read -r bootstrap_key bootstrap_value; do
+ case "$bootstrap_seen" in *":$bootstrap_key:"*) printf 'Clé de manifeste gestionnaire dupliquée.\n' >&2; exit 1;; esac
+ bootstrap_seen="$bootstrap_seen$bootstrap_key:"
+ case "$bootstrap_key" in
+  schema) [ "$bootstrap_value" = 1 ] || exit 1; bootstrap_manager_schema=1;;
+  sequence) bootstrap_manager_sequence=$bootstrap_value;; expires) bootstrap_manager_expires=$bootstrap_value;;
+  source_revision) bootstrap_manager_revision=$bootstrap_value;; manager_bytes) bootstrap_manager_bytes=$bootstrap_value;;
+  manager) bootstrap_manager=$bootstrap_value;; manager_sha256) bootstrap_manager_sha=$bootstrap_value;;
+  artifact_source) bootstrap_manager_origin=$bootstrap_value;;
+  *) printf 'Contrat gestionnaire inconnu.\n' >&2; exit 1;;
+ esac
+done < "$bootstrap_temp/manager.manifest"
+[ "$bootstrap_manager_schema" = 1 ] || exit 1
+for bootstrap_number in "$bootstrap_manager_sequence" "$bootstrap_manager_expires" "$bootstrap_manager_bytes"; do
+ case "$bootstrap_number" in ''|*[!0-9]*) exit 1;; esac
+ [ "${#bootstrap_number}" -le 12 ] || exit 1
+done
+[ "$bootstrap_manager_expires" -gt "$(date +%s)" ] && [ "$bootstrap_manager_bytes" -gt 0 ] && [ "$bootstrap_manager_bytes" -le 1048576 ] || exit 1
+case "$bootstrap_manager_revision:$bootstrap_manager_sha" in *[!0-9a-f:]*) exit 1;; esac
+[ "${#bootstrap_manager_revision}" -eq 40 ] && [ "${#bootstrap_manager_sha}" -eq 64 ] || exit 1
+case "$bootstrap_manager" in agent-manager-????????????.py) ;; *) exit 1;; esac
+case "$bootstrap_manager" in *[!a-z0-9.-]*) exit 1;; esac
+bootstrap_application_origin=$bootstrap_artifact_base
+if [ -n "$bootstrap_manager_origin" ]; then
+ case "$bootstrap_base" in https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/channel/beta|https://raw.githubusercontent.com/reptechwifx/wifx-voiceprobe-agent/main/channel/stable) ;; *) exit 1;; esac
+ bootstrap_tag=${bootstrap_manager_origin##*/}
+ [ "$bootstrap_manager_origin" = "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/$bootstrap_tag" ] || exit 1
+ case "$bootstrap_tag" in agent-?*) ;; *) exit 1;; esac
+ case "$bootstrap_tag" in *[!A-Za-z0-9_.-]*|'') exit 1;; esac
+ [ "${#bootstrap_tag}" -le 106 ] || exit 1
+fi
+bootstrap_artifact_base=$bootstrap_manager_origin
+bootstrap_fetch "$bootstrap_manager" "$bootstrap_temp/manage.py" "$bootstrap_manager_bytes"
+bootstrap_hash "$bootstrap_manager_sha" "$bootstrap_temp/manage.py"
+bootstrap_artifact_base=$bootstrap_application_origin
+case "${1-}" in install|update|update-manager|status|diagnose|rollback|version|help) ;; *) set -- install "$@";; esac
 if [ "$bootstrap_backend" = native ]; then
- bootstrap_fetch "$bootstrap_manager" "$bootstrap_temp/manage.py" 1048576
- bootstrap_hash "$bootstrap_manager_sha" "$bootstrap_temp/manage.py"
  python3 "$bootstrap_temp/manage.py" --strict --backend native --source "$bootstrap_base" --key "$bootstrap_temp/signing.pem" "$@"
 else
  case "$bootstrap_root" in /*voiceprobe*) ;; *) printf 'Répertoire persistant dédié Voice Probe requis.\n' >&2; exit 1;; esac
@@ -152,7 +190,7 @@ else
  [ "$bootstrap_existing" = "$bootstrap_id1" ] || [ "$bootstrap_existing" = "$bootstrap_id2" ] || { printf 'Identité image différente du manifeste signé.\n' >&2; exit 1; }
  bootstrap_docker_run() {
   bootstrap_tty=$1; shift
-  "$bootstrap_docker_cli" --host unix:///var/run/docker.sock run --rm --pull=never $bootstrap_tty --network host --user 0:0 --entrypoint python3 --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock --mount "type=bind,src=$bootstrap_root,dst=$bootstrap_root" --mount "type=bind,src=$bootstrap_root,dst=/var/lib/voiceprobe" --mount "type=bind,src=$bootstrap_temp,dst=$bootstrap_temp,readonly" "$bootstrap_existing" /opt/voiceprobe/installer/manage.py --strict --backend docker --data-root "$bootstrap_root" --source "$bootstrap_base" --key "$bootstrap_temp/signing.pem" "$@"
+  "$bootstrap_docker_cli" --host unix:///var/run/docker.sock run --rm --pull=never $bootstrap_tty --network host --user 0:0 --entrypoint python3 --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock --mount "type=bind,src=$bootstrap_root,dst=$bootstrap_root" --mount "type=bind,src=$bootstrap_root,dst=/var/lib/voiceprobe" --mount "type=bind,src=$bootstrap_temp,dst=$bootstrap_temp,readonly" "$bootstrap_existing" "$bootstrap_temp/manage.py" --strict --backend docker --data-root "$bootstrap_root" --source "$bootstrap_base" --key "$bootstrap_temp/signing.pem" "$@"
  }
  mkdir -p /usr/local/bin
  if [ -L /usr/local/bin/voiceprobe-agent-docker ] || { [ -e /usr/local/bin/voiceprobe-agent-docker ] && ! grep -q '# WIFX voiceprobe Agent management' /usr/local/bin/voiceprobe-agent-docker; }; then printf 'Commande voiceprobe-agent-docker homonyme inconnue ; aucune substitution.\n' >&2; exit 1; fi

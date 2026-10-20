@@ -14,6 +14,7 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import runpy
 import secrets
 import shlex
 import shutil
@@ -173,7 +174,7 @@ class Source:
         temporary = destination.with_name(destination.name + '.part-' + secrets.token_hex(6))
         try:
             h = hashlib.sha256(); total = 0
-            catalog = name in ('release.json','release.sig')
+            catalog = name in ('release.json','release.sig','manager.manifest','manager.sig')
             base = self.base if catalog or self.artifact_base is None else self.artifact_base
             opener = self.opener if catalog or self.artifact_opener is None else self.artifact_opener
             with opener.open(base + '/' + name, timeout=30) as response, temporary.open('xb') as stream:
@@ -191,6 +192,34 @@ class Source:
             raise Failure('Distribution inaccessible, certificat TLS refusé ou téléchargement interrompu.') from None
         finally:
             temporary.unlink(missing_ok=True)
+
+    def manager_manifest(self, directory, minimum=0):
+        path=self.download('manager.manifest',Path(directory)/'manager.manifest',maximum=16384)
+        signature=self.download('manager.sig',Path(directory)/'manager.sig',maximum=4096)
+        command(['openssl','dgst','-sha256','-verify',str(self.key),'-signature',str(signature),str(path)],
+                message='Signature du gestionnaire invalide ; aucun code exécuté.')
+        value={}
+        for line in path.read_text().splitlines():
+            key,separator,item=line.partition('=')
+            need(separator and key not in value,'Manifeste du gestionnaire mal formé ou dupliqué.')
+            value[key]=item
+        need(set(value)=={'schema','sequence','expires','manager','manager_sha256','manager_bytes','source_revision','artifact_source'}
+             and value['schema']=='1','Contrat du gestionnaire incompatible.')
+        for key in ('sequence','expires','manager_bytes'):
+            need(re.fullmatch('[0-9]{1,12}',value[key]),'Valeur du manifeste du gestionnaire invalide.')
+            value[key]=int(value[key])
+        need(value['sequence']>=minimum,'Gestionnaire plus ancien que celui déjà accepté ; replay refusé.')
+        need(time.time()<value['expires']<=time.time()+370*86400,'Manifeste du gestionnaire expiré.')
+        need(re.fullmatch(r'agent-manager-[a-f0-9]{12}\.py',value['manager']) and
+             re.fullmatch('[a-f0-9]{64}',value['manager_sha256']) and
+             re.fullmatch('[a-f0-9]{40}',value['source_revision']) and 0<value['manager_bytes']<=1024*1024,
+             'Identité ou taille du gestionnaire invalide.')
+        if value['artifact_source']:
+            need(github_channel(self.base) and github_release(value['artifact_source']),
+                 'Source du gestionnaire hors périmètre ; aucun code exécuté.')
+            self.artifact_base=value['artifact_source']
+            self.artifact_opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),GithubAssetRedirect(self.artifact_base),urllib.request.HTTPSHandler(context=self.context))
+        return value
 
     def manifest(self, directory, minimum=0):
         path = self.download('release.json', Path(directory)/'release.json', maximum=256*1024)
@@ -868,12 +897,60 @@ exit 0
                 'last_update':dt.datetime.now(dt.timezone.utc).isoformat()})
         atomic(self.settings_path,self.settings)
 
+    def refresh_manager(self, source, folder, install=True):
+        state_path=self.code/'manager-state.json'
+        state=private_json(state_path) if state_path.exists() else {}
+        manifest=source.manager_manifest(folder,state.get('sequence',0))
+        if state.get('sequence')==manifest['sequence']:
+            need(state.get('sha256')==manifest['manager_sha256'],'Gestionnaire différent sous une séquence déjà acceptée.')
+        current=Path(__file__)
+        if digest(current)==manifest['manager_sha256']:
+            qualified=current
+        else:
+            qualified=source.download(manifest['manager'],folder/manifest['manager'],expected=manifest['manager_sha256'],size=manifest['manager_bytes'],maximum=1024*1024)
+        if install:
+            need(self.code.stat().st_uid==0 and not self.code.stat().st_mode&0o022,
+                 'Répertoire du gestionnaire root non modifiable par l’Agent requis.')
+            destination=self.code/'admin/manage.py'
+            if not destination.is_file() or digest(destination)!=manifest['manager_sha256']:
+                self.install_command(qualified)
+            atomic(state_path,{'sequence':manifest['sequence'],'sha256':manifest['manager_sha256'],'source_revision':manifest['source_revision']})
+        return qualified
+
+    def update_manager(self):
+        need(self.settings.get('release') and self.cfg.is_file(),'Installation gérée requise ; aucun Agent installé par cet amorçage.')
+        with tempfile.TemporaryDirectory(prefix='voiceprobe-manager-') as temporary:
+            self.refresh_manager(self.source(),Path(temporary))
+        self.remote_enable()
+        print('Gestionnaire signé vérifié et maintenance distante préparée ; version Agent, données et comptes inchangés.')
+        return 'MANAGER_VERIFIED'
+
+    def relay_update(self, qualified):
+        try:
+            namespace=runpy.run_path(str(qualified),run_name='voiceprobe_verified_manager')
+            manager=namespace['Manager'](self.args)
+        except Exception:
+            raise Failure('Chargement du gestionnaire signé refusé ; aucune dépendance installée.') from None
+        if getattr(self,'remote_operation',None):manager.remote_operation=self.remote_operation
+        try:
+            return manager.update()
+        except namespace['Failure'] as rejected:
+            raise Failure(str(rejected)) from None
+        finally:
+            self.stage=manager.stage;self.settings=manager.settings
+
     def update(self):
         self.progress(1,'Vérification du système et de l’installation')
-        platform_key=self.platform_key() if self.args.backend=='native' else None
         source=self.source()
         with tempfile.TemporaryDirectory(prefix='voiceprobe-download-') as folder:
-            folder=Path(folder);manifest=source.manifest(folder,self.settings.get('sequence',0))
+            folder=Path(folder)
+            qualified=self.refresh_manager(source,folder,install=not self.args.check)
+            if digest(qualified)!=digest(Path(__file__)):
+                return self.relay_update(qualified)
+            # Management and application catalogs have separate signed lifecycles.
+            source=self.source()
+            platform_key=self.platform_key() if self.args.backend=='native' else None
+            manifest=source.manifest(folder,self.settings.get('sequence',0))
             if getattr(self.args,'requested_version',None):need(manifest['version']==self.args.requested_version,'Version demandée différente du manifeste signé actuel.')
             self.progress(2,'Architecture et manifeste signé vérifiés')
             installed=self.settings.get('release',{})
@@ -892,7 +969,6 @@ exit 0
                 need(runtime,'Aucun binaire PJSUA2 qualifié pour cette plateforme ; arrêt sans compilation.')
                 wanted=[manifest['agent'],runtime]
             else:wanted=[manifest['docker']]
-            if manifest.get('manager'):wanted.append(manifest['manager'])
             total=sum(v['bytes'] for v in wanted)
             persistent=sum(p.stat().st_size for p in self.data.rglob('*') if p.is_file() and not p.is_symlink()) if self.data.exists() else 0
             self.free_space(total*4+int(persistent*1.1))
@@ -945,7 +1021,7 @@ exit 0
                 if original:need(self.persistent_proof()==original,'Identité, adoption, mots de passe ou ports modifiés ; reprise suspendue.')
                 self.settings['previous']={'backend':self.previous,'release':current,'backup':str(backup)} if self.previous and self.previous.get('was_running',True) else None
                 self.retire_legacy_credentials()
-                self.install_command(artifacts[-1] if manifest.get('manager') else None);self.save_settings(source,manifest)
+                self.install_command();self.save_settings(source,manifest)
                 state['phase']='success';atomic(self.state_path,state)
                 self.progress(7,'Interface et connexion Controller vérifiées')
                 self.summary(manifest,status,created)
@@ -1271,6 +1347,7 @@ exit 0
             try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:raise Failure('Autre opération Agent en cours ; aucune action concurrente.') from None
             if self.args.action=='enable-remote-update':return self.remote_enable()
+            if self.args.action=='update-manager':return self.update_manager()
             if self.args.action=='remote-apply':return self.remote_apply()
             if self.args.action=='enable-schedule':return self.schedule(True)
             if self.args.action=='disable-schedule':return self.schedule(False)
@@ -1289,7 +1366,7 @@ class Parser(argparse.ArgumentParser):
 def main(argv=None):
     args=list(sys.argv[1:] if argv is None else argv);strict='--strict' in args
     parser=Parser(description=__doc__)
-    parser.add_argument('action',choices=['install','update','status','diagnose','rollback','version','help','configure','reset-password','enable-schedule','disable-schedule','watch','enable-remote-update','remote-apply','remote-watch'],nargs='?',default='help')
+    parser.add_argument('action',choices=['install','update','update-manager','status','diagnose','rollback','version','help','configure','reset-password','enable-schedule','disable-schedule','watch','enable-remote-update','remote-apply','remote-watch'],nargs='?',default='help')
     parser.add_argument('--backend',choices=['native','docker'],default='native')
     parser.add_argument('--instance',default='default');parser.add_argument('--data-root',default='/var/lib/voiceprobe-agent')
     parser.add_argument('--strict',action='store_true');parser.add_argument('--check',action='store_true')

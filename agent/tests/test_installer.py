@@ -66,6 +66,64 @@ class CryptographicDistribution(unittest.TestCase):
         path=self.source.download('payload',self.out/'artifact',expected=hashlib.sha256(data).hexdigest(),size=len(data))
         self.assertEqual(data,path.read_bytes());self.assertEqual(0o600,path.stat().st_mode&0o777)
 
+    def manager_catalog(self, **changes):
+        raw=b'# signed management fixture\n'
+        digest=hashlib.sha256(raw).hexdigest()
+        values={'schema':'1','sequence':'3','expires':str(int(time.time())+3600),
+                'manager':'agent-manager-'+digest[:12]+'.py','manager_sha256':digest,
+                'manager_bytes':str(len(raw)),'source_revision':'a'*40,'artifact_source':''}
+        values.update(changes)
+        (self.root/values['manager']).write_bytes(raw)
+        path=self.root/'manager.manifest';path.write_text(''.join(k+'='+v+'\n' for k,v in values.items()))
+        subprocess.run(['openssl','dgst','-sha256','-sign',str(self.key),'-out',str(self.root/'manager.sig'),str(path)],check=True,capture_output=True)
+        return values
+
+    def test_manager_is_signed_bounded_and_independent_of_application_catalog(self):
+        values=self.manager_catalog()
+        manifest=self.source.manager_manifest(self.out,minimum=3)
+        self.assertEqual(values['manager_sha256'],manifest['manager_sha256'])
+        manager=m.Manager.__new__(m.Manager);manager.code=self.out
+        qualified=manager.refresh_manager(self.source,self.out,install=False)
+        self.assertEqual(values['manager_sha256'],m.digest(qualified))
+        self.assertFalse((self.out/'manager-state.json').exists())
+        self.assertEqual([], [p for p in self.requests if p.endswith('/release.json')])
+        (self.root/values['manager']).write_bytes(b'corrupted manager')
+        qualified.unlink()
+        with self.assertRaises(m.Failure):manager.refresh_manager(self.source,self.out,install=False)
+
+    def test_manager_signature_replay_expiry_duplicate_and_origin_are_rejected_before_execution(self):
+        for changes in ({'sequence':'1'},{'expires':'1'},{'schema':'2'},
+                        {'artifact_source':'https://other.invalid/manager'}, {'manager_bytes':'1048577'}):
+            self.manager_catalog(**changes)
+            with self.assertRaises(m.Failure):self.source.manager_manifest(self.out,minimum=2)
+        self.manager_catalog();(self.root/'manager.sig').write_bytes(b'invalid')
+        with self.assertRaisesRegex(m.Failure,'Signature'):self.source.manager_manifest(self.out)
+        self.manager_catalog()
+        path=self.root/'manager.manifest'
+        path.write_bytes(path.read_bytes()+b'schema=1\n')
+        subprocess.run(['openssl','dgst','-sha256','-sign',str(self.key),'-out',str(self.root/'manager.sig'),str(path)],check=True,capture_output=True)
+        with self.assertRaises(m.Failure):self.source.manager_manifest(self.out)
+
+    def test_verified_manager_handoff_precedes_the_old_platform_and_dependency_logic(self):
+        raw=b'''class Failure(Exception): pass
+class Manager:
+    def __init__(self, args):
+        self.stage = 'new signed manager ran first'
+        self.settings = {'handoff_verified': True}
+    def update(self):
+        return 'CHECK_OK'
+'''
+        digest=hashlib.sha256(raw).hexdigest()
+        self.manager_catalog(manager='agent-manager-'+digest[:12]+'.py',manager_sha256=digest,manager_bytes=str(len(raw)))
+        (self.root/('agent-manager-'+digest[:12]+'.py')).write_bytes(raw)
+        manager=m.Manager.__new__(m.Manager);manager.code=self.out;manager.settings={}
+        manager.args=types.SimpleNamespace(check=True,backend='native')
+        manager.source=lambda:self.source
+        manager.platform_key=lambda:(_ for _ in ()).throw(AssertionError('Old platform/dependency logic must not run'))
+        self.assertEqual('CHECK_OK',manager.update())
+        self.assertTrue(manager.settings['handoff_verified'])
+        self.assertFalse((self.out/'manager-state.json').exists())
+
     def test_invalid_signature_replay_expiry_and_unqualified_schema(self):
         for changes in ({'sequence':0},{'expires':int(time.time())-1},{'data_schema':2},{'rollback_compatible':False},{'source_revision':'unknown'},{'installer_protocol':2}):
             with self.subTest(changes=changes):
