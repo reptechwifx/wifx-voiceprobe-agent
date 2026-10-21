@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "installer_protocol": 1,
-  "installer_version": "1.0.2",
-  "sequence": 2026102008,
-  "expires": 1800276373,
-  "version": "0.9-026",
-  "release_id": "0.9-026-59ff8c290faa",
-  "source_revision": "59ff8c290faa2b5772070937a3ccba7397d230da",
+  "installer_version": "1.0.4",
+  "sequence": 2026102101,
+  "expires": 1800348534,
+  "version": "0.9-027",
+  "release_id": "0.9-027-b8cbe096bd55",
+  "source_revision": "b8cbe096bd55c1e545a245726598ca9fc37864b4",
   "development": false,
   "data_schema": 1,
   "rollback_compatible": true,
@@ -24,26 +24,27 @@
     "0.9-021",
     "0.9-024",
     "0.9-025",
-    "0.9-026"
+    "0.9-026",
+    "0.9-027"
   ],
   "legacy_main_sha256": [
     "4eb79eb3e132ca033689b75d06f559d9a012657ac0dfd14e5731b03b45a30a32"
   ],
   "manager": {
-    "name": "agent-manager-ddc5d7e0a87e.py",
-    "bytes": 107923,
-    "sha256": "ddc5d7e0a87ed4f3a6ed062e29e59e360154c8108f073cdde66701fae8a0fa81"
+    "name": "agent-manager-2ebefc7784cd.py",
+    "bytes": 129215,
+    "sha256": "2ebefc7784cd43bfb106e723488a11bef41b29613677b5acaa6b0b72d654fbfb"
   },
   "agent": {
-    "name": "voiceprobe-agent-0.9-026-59ff8c290faa.tar.gz",
-    "bytes": 186482,
-    "sha256": "84b2a9eee7d5a310c39e1c1ca9628b44ad1a4d178a6d3ad1dd72c1eb018a48f9"
+    "name": "voiceprobe-agent-0.9-027-b8cbe096bd55.tar.gz",
+    "bytes": 187574,
+    "sha256": "f8f2d31857d90ef64049ad85f448ad42bee97db4dd39ae5bef1c37a817c2a574"
   },
   "runtimes": {
     "ubuntu-24.04-amd64-cp312": {
-      "name": "ubuntu-24.04-amd64-cp312-e243382e5d9a.tar.gz",
-      "bytes": 21020464,
-      "sha256": "e243382e5d9a04969cbe6baca01eda7eebd7d29a26d5fbc91d24b905001ce8b4",
+      "name": "ubuntu-24.04-amd64-cp312-f1650f1bc415.tar.gz",
+      "bytes": 20112573,
+      "sha256": "f1650f1bc41511a35566db1a618a8f93da82cc8690186312026525f86345b3b9",
       "python": "3.12",
       "soabi": "cpython-312-x86_64-linux-gnu",
       "glibc": "2.39",
@@ -63,17 +64,17 @@
         "libssl3t64",
         "libasound2t64"
       ],
-      "rtp_observer_protocol": 1,
+      "rtp_observer_protocol": 2,
       "rtp_playout_distribution_protocol": 2,
-      "observer_sha256": "06cbd979f439550d2ef05f0407194e49143aae72610c1cf3cd255023923c14cf",
+      "observer_sha256": "4ec3bb9d41db5284a126db938dcf0d696ddbf8edb140a60c60e02ca4dd336a7f",
       "rtcp_patch_sha256": "8a7ccd2dcafc2fc29c7b4d1a0af8692a4302b4beefbbd2d2ff7a74f36b06fc31",
       "rtcp_arithmetic": "vp-rtcp-safe-v1",
       "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c"
     },
     "debian-12-amd64-cp311": {
-      "name": "debian-12-amd64-cp311-e16e5c4b5f1f.tar.gz",
-      "bytes": 21270244,
-      "sha256": "e16e5c4b5f1f7048e632c9ac4b03fd8e5bbd08b7f717aecf5a27f7b0dfb544f9",
+      "name": "debian-12-amd64-cp311-bfa6425672a7.tar.gz",
+      "bytes": 20358626,
+      "sha256": "bfa6425672a7bc4d694a93b0e36a51388ea4aa460c2f69414ac2c31b30c854a0",
       "python": "3.11",
       "soabi": "cpython-311-x86_64-linux-gnu",
       "glibc": "2.36",
@@ -93,17 +94,17 @@
         "libssl3",
         "libasound2"
       ],
-      "rtp_observer_protocol": 1,
+      "rtp_observer_protocol": 2,
       "rtp_playout_distribution_protocol": 2,
-      "observer_sha256": "06cbd979f439550d2ef05f0407194e49143aae72610c1cf3cd255023923c14cf",
+      "observer_sha256": "4ec3bb9d41db5284a126db938dcf0d696ddbf8edb140a60c60e02ca4dd336a7f",
       "rtcp_patch_sha256": "8a7ccd2dcafc2fc29c7b4d1a0af8692a4302b4beefbbd2d2ff7a74f36b06fc31",
       "rtcp_arithmetic": "vp-rtcp-safe-v1",
       "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c"
     },
     "debian-13-arm64-cp313": {
-      "name": "debian-13-arm64-cp313-d0d69a5f852a.tar.gz",
-      "bytes": 16493695,
-      "sha256": "d0d69a5f852ab8198cc21bcfccf3a93f20adde090c73bc6530b65671f5974601",
+      "name": "debian-13-arm64-cp313-1de262e7e78d.tar.gz",
+      "bytes": 16495618,
+      "sha256": "1de262e7e78db5a60ddd94cf3e841561122f12547e71e5215c2a27f0d2d207ad",
       "python": "3.13",
       "soabi": "cpython-313-aarch64-linux-gnu",
       "glibc": "2.41",
@@ -122,22 +123,22 @@
         "libssl3t64",
         "libasound2t64"
       ],
-      "rtp_observer_protocol": 1,
+      "rtp_observer_protocol": 2,
       "rtp_playout_distribution_protocol": 2,
-      "observer_sha256": "06cbd979f439550d2ef05f0407194e49143aae72610c1cf3cd255023923c14cf",
+      "observer_sha256": "4ec3bb9d41db5284a126db938dcf0d696ddbf8edb140a60c60e02ca4dd336a7f",
       "rtcp_patch_sha256": "8a7ccd2dcafc2fc29c7b4d1a0af8692a4302b4beefbbd2d2ff7a74f36b06fc31",
       "rtcp_arithmetic": "vp-rtcp-safe-v1",
       "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c"
     }
   },
   "docker": {
-    "name": "voiceprobe-agent-image-0.9-026-59ff8c290faa.tar.gz",
-    "bytes": 291639601,
-    "sha256": "e7ac977d2dc6cee7a5fbf2afa81692275a62cebb7cb7d755586981af4cff0eaa",
-    "reference": "voiceprobe-agent-runtime:0.9-026-59ff8c290faa",
+    "name": "voiceprobe-agent-image-0.9-027-b8cbe096bd55.tar.gz",
+    "bytes": 312252044,
+    "sha256": "942a385c9002b7ac5f966e05d13f92d270483a00c361bfbfcbcac232ea6e385d",
+    "reference": "voiceprobe-agent-runtime:0.9-027-b8cbe096bd55",
     "image_ids": [
-      "sha256:7e391e97957ec7d85eccadfc0da79faad46d794a28876f18eed2577f256373b2",
-      "sha256:50325e6484abedaf71be924e4a92104d5736d84f2a3593142204525b3a27cecf"
+      "sha256:fcac52d752ac1ed5e0167d8e5ad42e047f6c320bbddc6c9c49570c23fcde295c",
+      "sha256:dba79944978cbcbdeb8f3cec3bfc99857299658eea4f1489781955182f01cf53"
     ],
     "rootfs_diff_ids": [
       "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
@@ -165,10 +166,13 @@
       "sha256:d224910ff7c031164c1e566f190bb1dc7514e600a92c8b4d41a8dffa35b42afd",
       "sha256:bbaa06862547bd6ee6dc5904ed745320aec9453b51ce55efdf3b51337c882b7d",
       "sha256:41463efe77f3b0583e8140c7c065e38b2c390c8a7201e95dabb27fdac1195fa7",
-      "sha256:3f128d4232ee5cbfe4b1ea21ec5206e420cf693fb954ae6543bc60553161ad2e"
+      "sha256:3f128d4232ee5cbfe4b1ea21ec5206e420cf693fb954ae6543bc60553161ad2e",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:2d6aa7175b28755e1d19b7442b25f447bd8fe00bb71a5c2548a00304b82722bc",
+      "sha256:0c156258022720259fe34577c54cc73a9c4752aa4902356394afaf8e67bc6c0a"
     ]
   },
-  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-026-installer-1.0.2",
+  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-027-installer-1.0.4",
   "corresponding_sources": [
     {
       "name": "corresponding-sources-agent-0.9-004.tar.gz",
@@ -189,6 +193,11 @@
       "name": "corresponding-sources-arm64-0.9-026.tar.gz",
       "bytes": 20266808,
       "sha256": "1cfb272a94ac1929758eabe492e231262792d949ea2bd02e2d6ea76f7f012d90"
+    },
+    {
+      "name": "corresponding-sources-observer-0.9-027.tar.gz",
+      "bytes": 80228,
+      "sha256": "824ca8940241f28434999ae5864a88424a48763b660ae805831fa74bcac767bf"
     }
   ]
 }
