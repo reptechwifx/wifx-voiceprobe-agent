@@ -9,7 +9,7 @@ def validate_binding(directory, project):
     directory, project = Path(directory), Path(project)
     metadata = json.loads((directory / 'binary.json').read_text(encoding='utf-8'))
     expected = {
-        'rtp_observer_protocol': 1,
+        'rtp_observer_protocol': 2,
         'rtp_playout_distribution_protocol': 2,
         'rtcp_arithmetic': 'vp-rtcp-safe-v1',
         'observer_sha256': hashlib.sha256((project / 'agent/installer/rtp-observer.h').read_bytes()).hexdigest(),
@@ -24,7 +24,8 @@ def validate_binding(directory, project):
                        for child in node.body) for node in wrapper.body):
         raise ValueError('Observateur RTP absent du binding Python Windows.')
     binary = (directory / '_pjsua2.pyd').read_bytes()
-    if b'Call_getVoiceProbeStats' not in binary or b'vp-rtcp-safe-v1' not in binary:
-        raise ValueError('Observateur RTP ou correctif RTCP absent du module natif Windows.')
+    if any(marker not in binary for marker in
+           (b'Call_getVoiceProbeStats', b'vp-rtcp-safe-v1', b'rtp-sequence-observer-v1')):
+        raise ValueError('Observateur RTP réseau ou correctif RTCP absent du module natif Windows.')
     return {**expected, 'binding_sha256': hashlib.sha256(binary).hexdigest(),
             'wrapper_sha256': hashlib.sha256((directory / 'pjsua2.py').read_bytes()).hexdigest()}

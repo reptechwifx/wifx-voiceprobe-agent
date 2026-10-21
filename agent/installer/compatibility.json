@@ -6,11 +6,13 @@
   ],
   "native_platforms": [
     "ubuntu-24.04-amd64-cp312",
-    "debian-12-amd64-cp311"
+    "debian-12-amd64-cp311",
+    "debian-13-arm64-cp313"
   ],
   "unqualified": [
     "ubuntu-22.04",
-    "arm64",
+    "armhf",
+    "docker-arm64",
     "physical-synology"
   ]
 }

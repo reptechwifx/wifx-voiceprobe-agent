@@ -23,7 +23,7 @@ class WindowsBuilderTest(unittest.TestCase):
         project = TOOL.parents[2]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            metadata = {'rtp_observer_protocol': 1, 'rtp_playout_distribution_protocol': 2,
+            metadata = {'rtp_observer_protocol': 2, 'rtp_playout_distribution_protocol': 2,
                         'rtcp_arithmetic': 'vp-rtcp-safe-v1'}
             for name, source in [('observer_sha256', 'agent/installer/rtp-observer.h'),
                                  ('rtcp_arithmetic_sha256', 'agent/installer/rtcp-safe.h'),
@@ -31,10 +31,10 @@ class WindowsBuilderTest(unittest.TestCase):
                 metadata[name] = hashlib.sha256((project / source).read_bytes()).hexdigest()
             (root / 'binary.json').write_text(json.dumps(metadata))
             (root / 'pjsua2.py').write_text('class Call:\n    def getVoiceProbeStats(self, index): pass\n')
-            binary = b'Call_getVoiceProbeStats\0vp-rtcp-safe-v1\0'
+            binary = b'Call_getVoiceProbeStats\0vp-rtcp-safe-v1\0rtp-sequence-observer-v1\0'
             (root / '_pjsua2.pyd').write_bytes(binary)
             self.assertEqual(validate_binding(root, project)['binding_sha256'], hashlib.sha256(binary).hexdigest())
-            for marker in (b'Call_getVoiceProbeStats', b'vp-rtcp-safe-v1'):
+            for marker in (b'Call_getVoiceProbeStats', b'vp-rtcp-safe-v1', b'rtp-sequence-observer-v1'):
                 (root / '_pjsua2.pyd').write_bytes(binary.replace(marker, b''))
                 with self.subTest(marker=marker), self.assertRaises(ValueError):
                     validate_binding(root, project)

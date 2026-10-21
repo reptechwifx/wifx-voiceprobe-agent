@@ -59,6 +59,8 @@ class ReceiverQuality:
         self.last = None
         self.audio_baseline = None
         self.audio_interval_index = None
+        self.network_buckets = {}
+        self.network_meta = None
 
     def begin_audio_phase(self):
         """Snapshot decoder counters after identification; retain full-call observations."""
@@ -72,7 +74,7 @@ class ReceiverQuality:
         self.audio_interval_index = len(self.intervals)
 
     def add(self, observation, codec=None):
-        if observation.get('protocol') != 1:
+        if observation.get('protocol') not in (1, 2):
             raise ValueError('Unsupported receiver observation')
         if codec:
             if len(self.codecs) < 4:
@@ -107,13 +109,44 @@ class ReceiverQuality:
             local_runs = observation.get('interval_loss_runs')
             if type(local_runs) is not int or not 0 <= local_runs <= observation['lost'] or any(type(observation.get(k)) is not bool for k in ('interval_starts_lost', 'interval_ends_lost')):
                 raise ValueError('Invalid interval loss boundaries')
+        states = observation.get('playout_states')
+        if states is not None:
+            if states.get('protocol') != 1 or any(type(states.get(k)) is not int or states[k] < 0 or states[k] > 1_000_000 for k in
+                ('missing', 'empty', 'prefetch', 'total_missing', 'total_empty', 'total_prefetch')):
+                raise ValueError('Invalid playout states')
+            if states['missing'] + states['empty'] + states['prefetch'] != observation['lost']:
+                raise ValueError('Inconsistent playout states')
+        network = observation.get('network')
+        if network is not None:
+            if network.get('protocol') != 1 or network.get('method') != 'rtp-sequence-observer-v1' or network.get('bucket_s') != 2 or type(network.get('valid')) is not bool:
+                raise ValueError('Unsupported network observation')
+            origin = network.get('origin_delta_ms')
+            if isinstance(origin, bool) or not isinstance(origin, (int, float)) or not math.isfinite(origin) or abs(origin) > 605000:
+                raise ValueError('Invalid network origin')
+            changes = network.get('changes')
+            segments = network.get('segments')
+            if not isinstance(changes, list) or len(changes) > MAX_INTERVALS or not isinstance(segments, list) or len(segments) > 16:
+                raise ValueError('Invalid network bounds')
+            for row in changes:
+                if not isinstance(row, list) or len(row) != 12 or any(type(v) is not int or v < 0 or v > 1_000_000 for v in row) or row[0] >= MAX_INTERVALS:
+                    raise ValueError('Invalid network bucket')
+                if row[2] + row[3] != row[1] or row[5] + row[6] + row[7] != row[4]:
+                    raise ValueError('Inconsistent network bucket')
+            for segment in segments:
+                if not isinstance(segment, dict) or any(k not in segment for k in ('id', 'ssrc', 'start_s', 'end_s', 'first_seq', 'last_seq')):
+                    raise ValueError('Invalid network segment')
+            self.network_meta = {k: network[k] for k in ('protocol', 'method', 'bucket_s', 'valid', 'out_of_window', 'origin_delta_ms', 'segments')}
+            for row in changes:
+                self.network_buckets[row[0]] = row
         end = observation['elapsed_ms']
         if not math.isfinite(end) or end < self.end_ms or len(self.intervals) >= MAX_INTERVALS:
             self.valid = False
         if self.ssrc is not None and observation['ssrc'] != self.ssrc:
             self.valid = False
         self.ssrc = observation['ssrc']
-        self.valid = self.valid and observation['valid'] and not observation['overflow']
+        local_timing_valid = bool(observation['valid'] and not observation['overflow'])
+        self.valid = self.valid and local_timing_valid
+        local_format_stable = not self.last or all(observation.get(key) == self.last.get(key) for key in ('frame_ms', 'plc_enabled', 'packetization_ms'))
         if count:
             self.minimum = observation['min_ms'] if self.minimum is None else min(self.minimum, observation['min_ms'])
             self.maximum = observation['max_ms'] if self.maximum is None else max(self.maximum, observation['max_ms'])
@@ -128,19 +161,23 @@ class ReceiverQuality:
                 'jitter_ms_mean': observation['jitter_sum_ms'] / count if count else None,
                 'received': observation['received'], 'lost': observation['lost'], 'loss_runs': observation.get('interval_loss_runs', observation['loss_runs']),
                 'distribution_protocol': distribution, 'starts_lost': observation.get('interval_starts_lost'), 'ends_lost': observation.get('interval_ends_lost'),
-                'valid': bool(observation['valid'])})
+                'valid': local_timing_valid, 'ssrc': observation['ssrc'], 'codec': codec,
+                'format_stable': local_format_stable, 'packetization_ms': observation['packetization_ms'],
+                'frame_ms': observation['frame_ms'], 'plc_enabled': observation['plc_enabled'],
+                'playout_states': states})
         self.end_ms = end
         self.last = observation
         return self
 
-    def playout(self, codec, received, lost, runs, distribution=None):
-        observation = self.last
+    def playout(self, codec, received, lost, runs, distribution=None, observation=None, format_stable=None):
+        observation = observation or self.last
         name = codec.upper().split('/')[0]
         # PJSIP's default G.711 PLC is WSOLA, not the G.711 Appendix I profile.
         profile = ('pjsip-wsola' if observation['plc_enabled'] else 'g711-no-plc') if name in ('PCMA', 'PCMU') else 'codec-profile-unqualified'
         probability = lost / (received + lost) if received + lost else 0
         burst = (lost / runs) * (1 - probability) if runs and lost else (1.0 if lost == 0 else None)
-        return {'valid': bool(self.valid and self.format_stable and self.count >= 2), 'format_stable': self.format_stable, 'observed_codecs': sorted(self.codecs), 'profile': profile, 'packetization_ms': observation['packetization_ms'], 'frame_ms': observation['frame_ms'],
+        stable = self.format_stable if format_stable is None else format_stable
+        return {'valid': bool(stable and received + lost > 0), 'format_stable': stable, 'observed_codecs': sorted(self.codecs), 'profile': profile, 'packetization_ms': observation['packetization_ms'], 'frame_ms': observation['frame_ms'],
                 'distribution_protocol': distribution or observation.get('distribution_protocol', 1), 'unit': 'decoder-frame', 'received': received, 'lost': lost, 'loss_runs': runs, 'burst_ratio': burst,
                 'warmup': 'Initial prefetch excluded until first normal decoded frame', 'source': 'pjmedia-jbuf-output-v1'}
 
@@ -155,6 +192,9 @@ class ReceiverQuality:
             'duplicates': self.last['duplicates'], 'reordered': self.last['reordered'], 'excluded': self.last['excluded'],
             'out_of_range': self.last['overflow'], 'observed_s': round(self.end_ms / 1000, 3)},
             'playout': self.playout(codec, self.last['total_received'], self.last['total_lost'], self.last['total_loss_runs']), 'intervals': []}
+        if self.last.get('playout_states'):
+            result['playout'].update({k: self.last['playout_states']['total_' + k] for k in ('missing', 'empty', 'prefetch')})
+            result['playout']['state_protocol'] = 1
         if self.audio_baseline is not None:
             received, lost, runs, start_ms = self.audio_baseline
             deltas = (self.last['total_received'] - received, self.last['total_lost'] - lost,
@@ -169,9 +209,28 @@ class ReceiverQuality:
             result['pjsip_jitter'] = dict(self.last['pjsip_jitter'])
         for index, interval in enumerate(self.intervals):
             summary = {key: interval[key] for key in ['count', 'min_ms', 'max_ms', 'sum_ms', 'p95_transit_ms']}
+            local = {'packetization_ms': interval['packetization_ms'], 'frame_ms': interval['frame_ms'], 'plc_enabled': interval['plc_enabled'], 'distribution_protocol': interval['distribution_protocol']}
+            playout = self.playout(interval['codec'] or codec, interval['received'], interval['lost'], interval['loss_runs'],
+                                   interval['distribution_protocol'], local, interval['format_stable'])
+            playout.update(starts_lost=interval['starts_lost'], ends_lost=interval['ends_lost'])
+            if interval['playout_states']:
+                playout.update({k: interval['playout_states'][k] for k in ('missing', 'empty', 'prefetch')})
+                playout['state_protocol'] = 1
             result['intervals'].append({'offset_s': interval['offset_s'], 'duration_s': interval['duration_s'],
                 'phase': 'audio' if self.audio_interval_index is not None and index >= self.audio_interval_index else 'identification' if self.audio_baseline is not None else 'full_call',
-                'timing': {'method': 'rtp-arrival-v1', 'representation': 'transit-summary-v1', 'clock_stable': bool(self.valid and interval['valid']),
-                           'ssrc': self.ssrc, 'reference_min_ms': self.minimum, 'resolution_ms': .25, 'summary': summary},
-                'playout': dict(self.playout(codec, interval['received'], interval['lost'], interval['loss_runs'], interval['distribution_protocol']), starts_lost=interval['starts_lost'], ends_lost=interval['ends_lost']), 'jitter_ms_mean': interval['jitter_ms_mean']})
+                'timing': {'method': 'rtp-arrival-v1', 'representation': 'transit-summary-v1', 'clock_stable': interval['valid'],
+                           'ssrc': interval['ssrc'], 'reference_min_ms': self.minimum, 'resolution_ms': .25, 'summary': summary},
+                'playout': playout, 'jitter_ms_mean': interval['jitter_ms_mean']})
+        if self.network_meta:
+            rows = list(self.network_buckets.values())
+            result['network_timeline'] = {**self.network_meta,
+                'scope': 'RTP reçu, tous payload types ; pertes attribuées au paquet révélant le trou de séquence',
+                'audio_start_observed_s': round(self.audio_baseline[3] / 1000, 3) if self.audio_baseline else None,
+                'received_unique': sum(row[1] for row in rows), 'missing_final': sum(row[4] for row in rows),
+                'expected': sum(row[1] + row[4] for row in rows),
+                'intervals': [{'offset_s': round(row[0] * 2 + self.network_meta['origin_delta_ms'] / 1000, 3),
+                    'duration_s': 2, 'received_unique': row[1], 'audio_received': row[2], 'other_received': row[3],
+                    'missing_final': row[4], 'audio_missing': row[5], 'other_missing': row[6], 'mixed_missing': row[7],
+                    'gap_recovered': row[8], 'reordered': row[9], 'duplicates': row[10], 'segment': row[11]}
+                    for row in sorted(rows)]}
         return result

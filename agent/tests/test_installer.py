@@ -283,12 +283,12 @@ class LocalSafety(unittest.TestCase):
         self.assertEqual([],legacy['CapAdd'])
         self.assertEqual(['no-new-privileges:true','seccomp=default'],legacy['SecurityOpt'])
 
-    def test_network_profile_is_required_for_025_and_preserves_024(self):
+    def test_network_profile_is_required_for_027_and_preserves_024(self):
         self.assertTrue(m.network_diagnostics('0.9-025'))
         self.assertTrue(m.network_diagnostics('0.9-024'))
         self.assertFalse(m.network_diagnostics('0.9-021'))
         self.assertTrue(m.docker_network_diagnostics('0.9-027'))
-        self.assertFalse(m.network_diagnostics('0.9-027'))
+        self.assertTrue(m.network_diagnostics('0.9-027'))
 
     def test_docker_verification_requires_effective_diagnostics_not_only_cap_add(self):
         manager=types.SimpleNamespace(args=types.SimpleNamespace(instance='test'),data=self.root/'data',code=self.root/'code',settings={})

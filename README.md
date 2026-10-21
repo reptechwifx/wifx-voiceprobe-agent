@@ -1,5 +1,22 @@
 # WIFX Voice Probe Agent
 
+## Bêta 0.9-027 — pertes RTP dans le temps
+
+L'Agent 027 enregistre, pour chaque réception, une chronologie compacte des
+séquences RTP reçues et manquantes par intervalles de deux secondes. Les doublons,
+réordonnancements, arrivées tardives et changements de SSRC restent distingués ;
+les paquets `telephone-event` ne sont pas confondus avec des pertes audio. Le
+rapport sépare aussi les trames manquantes, le tampon vide et le préremplissage
+avant restitution. Aucun contenu audio ou paquet RTP n'est conservé par cet
+observateur. Il ne demande ni capture réseau permanente ni privilège nouveau.
+
+Le Controller 0.9-029 affiche ces observations sans reconstruire rétroactivement
+les pertes des anciens rapports. Le MOS G.711 reste une estimation de référence,
+avec les dégradations sévères signalées à confiance faible ; G.722 n'utilise
+pas cette formule. Les Agents 026 et 027 peuvent cohabiter. Les trois runtimes
+Linux natifs PJSIP 2.16 sont reconstruits pour le protocole 2 ; Windows portable
+027 reste un modèle Bêta/LAB distinct, sans signature Authenticode client.
+
 ## Maintenance Docker/Synology 1.0.4
 
 Gestionnaire signé **2026102010**, Agent **0.9-026 inchangé** : normalisation ciblée

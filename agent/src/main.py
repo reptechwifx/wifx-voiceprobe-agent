@@ -973,7 +973,7 @@ class Agent:
                 "correlation_modes": ["header", "window"],
                 "automatic_incoming": True,
                 "dtmf_identification": {"protocol": 2, "protocols": [1, 2], "methods": ["rtp_telephone_event"], "window_s": 10, "discovery": True},
-                "media_quality": {"protocol": 1, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
+                "media_quality": {"protocol": 2, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "network_timeline": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
                 "distribution_platform": self.distribution_platform(),

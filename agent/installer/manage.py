@@ -500,7 +500,7 @@ class Engine:
 
 
 def network_diagnostics(version):
-    return version in ('0.9-024','0.9-025','0.9-026')
+    return version in ('0.9-024','0.9-025','0.9-026','0.9-027')
 
 
 def docker_network_diagnostics(version):

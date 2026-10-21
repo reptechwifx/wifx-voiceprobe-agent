@@ -37,4 +37,4 @@ PATH="$(dirname "$PYTHON_EXEC"):$PATH" make
 "$PYTHON_EXEC" -c 'import pjsua2; print("PJSUA2 binding available")'
 
 install -d -m 0755 "$PJSIP_PREFIX"
-printf '%s\n' '2.16;calls=128;accounts=32;conf_ports=512;rtp_observer=1' > "$PJSIP_PREFIX/voiceprobe-build.txt"
+printf '%s\n' '2.16;calls=128;accounts=32;conf_ports=512;rtp_observer=2' > "$PJSIP_PREFIX/voiceprobe-build.txt"

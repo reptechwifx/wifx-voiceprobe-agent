@@ -40,7 +40,7 @@ class ReceiverPrecisionTest(unittest.TestCase):
         self.assertEqual(o['min_ms'],0)
 
     def test_loss_runs_span_intervals_without_double_counting(self):
-        rows=self.observe('s 0\np 1 100 1000 1\nf 2 10\nf 1 20\nf 2 3\ns 2000\nf 2 2\nf 1 10\nf 2 1\np 51 8100 2010 1\ns 3000\n')
+        rows=self.observe('s 0\np 1 100 1000 1\nf 0 10\nf 1 20\nf 0 3\ns 2000\nf 0 2\nf 1 10\nf 0 1\np 51 8100 2010 1\ns 3000\n')
         self.assertEqual(rows[0],{'pending':3});a,b=rows[1:];self.assertEqual((a['received'],a['lost'],a['loss_runs']),(20,3,1));self.assertEqual((b['received'],b['lost'],b['loss_runs']),(10,3,1))
         self.assertEqual((b['total_received'],b['total_lost'],b['total_loss_runs']),(30,6,2))
         self.assertEqual(a['distribution_protocol'], 2)
@@ -63,7 +63,7 @@ class ReceiverPrecisionTest(unittest.TestCase):
         self.assertEqual(snapshot['playout']['observed_codecs'], ['G722/16000','PCMA/8000'])
 
     def test_old_protocol_stays_accepted_without_inventing_interval_boundaries(self):
-        row=self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 100\nf 2 2\ns 3000\n')[0]
+        row=self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 100\nf 0 2\ns 3000\n')[0]
         for key in ['distribution_protocol','interval_loss_runs','interval_starts_lost','interval_ends_lost']:
             row.pop(key)
         snapshot=ReceiverQuality().add(row).snapshot('PCMA')
@@ -87,10 +87,10 @@ class ReceiverPrecisionTest(unittest.TestCase):
             o=self.observe(f'p 1 100 1000 1\np 2 260 1020 1\ns {3000+i*2000}\n')[0]
             o['elapsed_ms']=(i+1)*2000;q.add(o)
         self.assertEqual(q.count,600);self.assertEqual(len(q.histogram),1);self.assertEqual(len(q.intervals),300)
-        self.assertLess(len(json.dumps(q.snapshot('G722'))),250000)
+        self.assertLess(len(json.dumps(q.snapshot('G722'))),320000)
 
     def test_dtmf_decoder_erasures_remain_raw_but_audio_phase_uses_later_counters(self):
-        rows = self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 200\nf 2 300\ns 10000\n'
+        rows = self.observe('p 1 100 1000 1\np 2 260 1020 1\nf 1 200\nf 0 300\ns 10000\n'
                             'p 3 420 11000 1\np 4 580 11020 1\nf 1 200\ns 12000\n')
         q = ReceiverQuality().add(rows[0], 'PCMA/8000')
         q.begin_audio_phase()
@@ -100,5 +100,45 @@ class ReceiverPrecisionTest(unittest.TestCase):
         self.assertEqual(result['audio_phase']['playout']['lost'], 0)
         self.assertEqual(result['audio_phase']['playout']['received'], 200)
         self.assertEqual([i['phase'] for i in result['intervals']], ['identification', 'audio'])
+
+    def test_network_sequence_gaps_are_corrected_by_late_packets(self):
+        rows = self.observe('p 1 100 1000 7\np 2 260 1020 7\ns 2000\n'
+                            'p 4 580 3020 7\ns 3030\n'
+                            'p 3 420 5000 7\np 3 420 5001 7\ns 5010\n')
+        q = ReceiverQuality()
+        for row in rows:
+            q.add(row, 'PCMA/8000')
+        network = q.snapshot('PCMA/8000')['network_timeline']
+        self.assertEqual((network['received_unique'], network['missing_final'], network['expected']), (4, 0, 4))
+        self.assertEqual([(p['offset_s'], p['missing_final']) for p in network['intervals']], [(0, 0), (2, 0), (4, 0)])
+        self.assertEqual((network['intervals'][2]['gap_recovered'], network['intervals'][2]['duplicates']), (1, 1))
+
+    def test_network_loss_and_local_buffer_interruption_are_separate_observations(self):
+        lost_packet = self.observe('p 1 100 1000 7\np 2 260 1020 7\np 4 580 1060 7\nf 1 200\ns 1070\n')[0]
+        network = ReceiverQuality().add(lost_packet, 'PCMA/8000').snapshot('PCMA/8000')['network_timeline']
+        self.assertEqual((network['received_unique'], network['missing_final'], network['expected']), (3, 1, 4))
+        self.assertEqual(network['intervals'][0]['audio_missing'], 1)
+        self.assertEqual(lost_packet['total_lost'], 0)
+
+        local_interruption = self.observe('p 1 100 1000 7\np 2 260 1020 7\np 3 420 1040 7\n'
+                                          'f 1 100\nf 3 20\nf 1 80\ns 1060\n')[0]
+        result = ReceiverQuality().add(local_interruption, 'PCMA/8000').snapshot('PCMA/8000')
+        self.assertEqual(result['network_timeline']['missing_final'], 0)
+        self.assertEqual((result['playout']['lost'], result['playout']['empty']), (20, 20))
+
+    def test_network_burst_dtmf_segments_and_playout_states(self):
+        rows = self.observe('p 10 100 1000 7\ne 11 260 1020 7\ne 12 260 1040 7\np 13 420 1060 7\n'
+                            'p 23 2020 1260 7\nf 1 100\nf 0 18\nf 3 10\nf 2 10\ns 1300\n'
+                            'p 1 100 1500 8\ns 1600\n')
+        q = ReceiverQuality()
+        for row in rows:
+            q.add(row, 'PCMA/8000')
+        result = q.snapshot('PCMA/8000')
+        network = result['network_timeline']
+        self.assertEqual((network['received_unique'], network['missing_final'], network['expected']), (6, 9, 15))
+        self.assertEqual((network['intervals'][0]['audio_missing'], network['intervals'][0]['other_missing'], network['intervals'][0]['mixed_missing']), (9, 0, 0))
+        self.assertEqual(len(network['segments']), 2)
+        self.assertEqual((result['playout']['missing'], result['playout']['empty'], result['playout']['prefetch']), (18, 10, 10))
+        self.assertEqual(result['playout']['lost'], 38)
 
 if __name__=='__main__':unittest.main()
