@@ -10,8 +10,8 @@ os.umask(0o077)
 try:
     import ipaddress
     bind = os.environ.get('VOICEPROBE_LOCAL_BIND')
-    if bind and ipaddress.ip_address(bind).version != 4:
-        raise ValueError('IPv4 management bind required')
+    if bind and bind != 'auto' and ipaddress.ip_address(bind).version != 4:
+        raise ValueError('Automatic or IPv4 management bind required')
     ports = {}
     for variable, field, maximum in [('VOICEPROBE_SIP_PORT', 'sip_port', 65535), ('VOICEPROBE_RTP_BASE_PORT', 'rtp_base_port', 62355)]:
         value = os.environ.get(variable)

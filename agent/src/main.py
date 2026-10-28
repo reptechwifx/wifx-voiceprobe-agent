@@ -7,7 +7,8 @@ from incoming import correlate, trusted_pbx_addresses, reception_status, outgoin
 from reporting import recovery_report, ReportOutbox
 from remote_update import RemoteUpdate
 from sdp import constrain_audio
-from localweb import build_server
+from localweb import LocalWebService
+from network_lifecycle import NetworkMonitor
 from version import VERSION, DISPLAY_VERSION, BUILD_ID
 from identity import exchange, verify_identity, atomic_json
 from maintenance import Maintenance
@@ -15,8 +16,10 @@ from credentials import hash_password
 from journal import EventJournal, redact
 from telemetry import system_snapshot, network_snapshot
 from rtp_quality import ReceiverQuality, annotate_pjsip_jitter
+from jitter_buffer import JitterBufferHistory
+from jitter_profiles import validate_profile, apply_profile, verify_readback, supported as jitter_profiles_supported
 from network_diagnostics import (INITIAL_METHOD, MEDIA_DSCP, SIP_DSCP, observed_peer,
-    set_dscp, start as start_network_diagnostic, unavailable as network_unavailable)
+    set_dscp, validate_settings, start as start_network_diagnostic, unavailable as network_unavailable)
 from dtmf_identity import (FrameReceiver, NumericFrameReceiver, IDENTIFICATION_SECONDS, DTMF_DURATION_MS,
     NUMERIC_DTMF_DURATION_MS,
     DISCOVERY_REQUEST, DISCOVERY_REPLY, NUMERIC_DISCOVERY_REQUEST, NUMERIC_DISCOVERY_REPLY,
@@ -57,6 +60,11 @@ class ProbeCall(pj.Call):
         self.run_id = run_id
         self.duration = duration
         self.created = time.monotonic()
+        self.jitter_profile = None
+        self.jitter_profile_application = None
+        self.jitter_profile_error = None
+        self.jitter_history = JitterBufferHistory()
+        self.jitter_history.started = self.created
         self.incoming = None
         self.answer_at = None
         self.pending_response = None
@@ -110,6 +118,8 @@ class ProbeCall(pj.Call):
         self.audio_phase_started = False
         self.rtp_audio_baseline = None
         self.audio_phase_offset_s = None
+        remote_network = (getattr(self.agent, "remote", None) or {}).get("network_test_settings")
+        self.network_settings = validate_settings(remote_network) if remote_network and os.name != "nt" else None
         self.network_peer = None
         self.network_jobs = {}
         self.network_results = {}
@@ -153,7 +163,7 @@ class ProbeCall(pj.Call):
 
     def onCallMediaState(self, prm):
         try:
-            if self.media is not None:
+            if self.media is not None or self.jitter_profile_error:
                 return
             self.media = self.getAudioMedia(-1)
             if self.started and self.dtmf_started_at is None:
@@ -299,7 +309,16 @@ class ProbeCall(pj.Call):
             self.receiver_quality.begin_audio_phase()
             self.audio_phase_started = True
 
+    def onStreamPreCreate(self, prm):
+        if self.jitter_profile is None or prm.streamInfo.type != pj.PJMEDIA_TYPE_AUDIO:
+            return
+        try:
+            self.jitter_profile_application = apply_profile(prm.streamInfo, self.jitter_profile, self.agent.pjsip_version)
+        except ValueError as error:
+            self.jitter_profile_error = str(error)
+
     def sample(self):
+        info = None
         if not self.established or self.finished:
             return
         try:
@@ -339,11 +358,7 @@ class ProbeCall(pj.Call):
                 ),
                 "rx_payload_type": getattr(info, "rxPt", None),
                 "tx_payload_type": getattr(info, "txPt", None),
-                "jitter_buffer": {
-                    "lost": stat.jbuf.lost,
-                    "discarded": stat.jbuf.discard,
-                    "empty": stat.jbuf.empty,
-                },
+                "jitter_buffer": self.jitter_history.observe(getattr(stat, "jbuf", None), info, rx=stream(stat.rtcp.rxStat)),
                 "rtp_interruptions": None,
                 "network_loss_bursts": None,
             }
@@ -377,6 +392,13 @@ class ProbeCall(pj.Call):
             except Exception:
                 pass
 
+        if self.stats.get("jitter_buffer") and self.jitter_profile_application:
+            self.stats["jitter_buffer"]["profile_application"] = verify_readback(
+                self.jitter_profile_application, self.stats["jitter_buffer"]["state"], info)
+            if not self.stats["jitter_buffer"]["profile_application"]["readback_verified"]:
+                self.jitter_profile_error = "JITTER_PROFILE_NOT_APPLIED: Native readback differs from requested profile"
+        if self.jitter_profile_error:
+            self.stats["jitter_profile_error"] = self.jitter_profile_error
         self.collect_receiver_quality()
         if self.receiver_quality.latest:
             self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
@@ -428,6 +450,8 @@ class ProbeCall(pj.Call):
                 self._start_network_diagnostic("icmp", slot=initial_key)
             else:
                 self._start_network_diagnostic("udp")
+            if self.network_settings and self.network_settings['profile'] == 'deep' and "icmp" not in self.network_started:
+                self._start_network_diagnostic("icmp")
         no_dtmf = not (self.dtmf_frame or self.dtmf_expected)
         if "icmp" not in self.network_started and (self.audio_phase_started or no_dtmf and elapsed >= IDENTIFICATION_SECONDS):
             rx = self.stats.get("rx", {})
@@ -449,9 +473,13 @@ class ProbeCall(pj.Call):
         self.network_started.add(key)
         self.network_phases[key] = phase
         try:
-            job = start_network_diagnostic(method, self.network_peer)
+            if self.network_settings and not self.network_settings[method + '_enabled']:
+                self.network_results[key] = network_unavailable("disabled_by_policy", method, self.network_peer, self.network_settings)
+                return
+            job = (start_network_diagnostic(method, self.network_peer, self.network_settings)
+                   if self.network_settings else start_network_diagnostic(method, self.network_peer))
             if job is None:
-                self.network_results[key] = network_unavailable("agent_probe_limit", method, self.network_peer)
+                self.network_results[key] = network_unavailable("agent_probe_limit", method, self.network_peer, self.network_settings)
             else:
                 self.network_jobs[key] = job
         except (OSError, ValueError):
@@ -494,6 +522,7 @@ class ProbeCall(pj.Call):
                 self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
 
     def onStreamDestroyed(self, prm):
+        self.jitter_history.new_stream()
         self.collect_receiver_quality(force=True)
         if self.receiver_quality.latest:
             self.stats.setdefault('rx', {}).update(self.receiver_quality.latest)
@@ -664,6 +693,10 @@ class ProbeAccount(pj.Account):
                                  value.get("expires", 0) > time.monotonic()
                                  for value in self.agent.prepared.values())
         call.preferred = prep.get("preferred_codec") if prep else None
+        if prep and prep.get("jitter_profile"):
+            call.jitter_profile = validate_profile(prep["jitter_profile"])
+        if prep and prep.get("network_test_settings") is not None and os.name != "nt":
+            call.network_settings = validate_settings(prep["network_test_settings"])
         call.destination = self.config["username"]
         op = pj.CallOpParam()
         op.statusCode = reception_status(self.config, (self.agent.remote or {}).get("mode", "standby"), source, self.trusted_sources, self.agent.capacity(self))
@@ -956,6 +989,7 @@ class Agent:
             "pjsip_version": self.pjsip_version,
             "identity_fingerprint": self.cfg.get("identity_fingerprint"),
             "connection_state": self.connection_state(),
+            "local_web_state": self.local_web.status if getattr(self, "local_web", None) else "disabled",
             "controller_version": self.controller_version,
             "started_at": self.started_at,
             "uptime_s": round(time.time() - self.process_started),
@@ -974,6 +1008,8 @@ class Agent:
                 "automatic_incoming": True,
                 "dtmf_identification": {"protocol": 2, "protocols": [1, 2], "methods": ["rtp_telephone_event"], "window_s": 10, "discovery": True},
                 "media_quality": {"protocol": 2, "supported_playout_distributions": [1, 2], "receiver_timing": hasattr(pj.Call, "getVoiceProbeStats"), "playout_observer": hasattr(pj.Call, "getVoiceProbeStats"), "network_timeline": hasattr(pj.Call, "getVoiceProbeStats"), "interval_s": 2, "pdv_resolution_ms": .25},
+                "network_diagnostics": {"protocol": 2 if os.name != "nt" else 1},
+                "jitter_buffer": {"protocol": 1, "state": hasattr(pj.Call, "getStreamStat"), "sample_interval_s": 1, "fixed_profiles": jitter_profiles_supported(self.pjsip_version, pj.Call), "profile_protocol": 1 if jitter_profiles_supported(self.pjsip_version, pj.Call) else None},
                 "configuration_ack_protocol": 1,
                 "remote_update": self.remote_update.capability() if hasattr(self,"remote_update") else {"protocol":1,"enabled":False},
                 "distribution_platform": self.distribution_platform(),
@@ -1225,12 +1261,10 @@ class Agent:
             )
             if x.get("proxy"):
                 ac.sipConfig.proxies.append(x["proxy"])
-            route = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            route.connect((x["server"].split(":")[0], 5060))
-            sip_ip = route.getsockname()[0]
-            route.close()
-            ac.mediaConfig.transportConfig.boundAddress = sip_ip
-            ac.mediaConfig.transportConfig.publicAddress = sip_ip
+            # PJSIP selects the current route when creating each media transport.
+            # A previous DHCP address must never remain pinned to an account.
+            ac.mediaConfig.transportConfig.boundAddress = ""
+            ac.mediaConfig.transportConfig.publicAddress = ""
             ac.mediaConfig.transportConfig.port = int(self.cfg.get("rtp_base_port", 4000)) + slot * 100
             ac.mediaConfig.transportConfig.portRange = 80
             set_dscp(ac.mediaConfig.transportConfig, pj, MEDIA_DSCP)
@@ -1305,6 +1339,12 @@ class Agent:
                     raise ValueError("DURATION_INVALID: Durée invalide ou supérieure à la limite du compte SIP.")
                 if payload.get("preferred_codec") and payload["preferred_codec"] not in account.config.get("codecs", []):
                     raise ValueError("CODEC_UNSUPPORTED: Codec absent de la configuration du compte SIP.")
+                if payload.get("jitter_profile") is not None:
+                    validate_profile(payload["jitter_profile"])
+                    if not jitter_profiles_supported(self.pjsip_version, pj.Call):
+                        raise ValueError("JITTER_PROFILE_UNSUPPORTED: Native binding not qualified")
+                if payload.get("network_test_settings") is not None and os.name != "nt":
+                    validate_settings(payload["network_test_settings"])
                 if command["kind"] == "prepare":
                     if mode not in ("receiver", "bidirectional") or account.config.get("call_mode") == "caller":
                         raise ValueError("INCOMING_DISABLED: Réception désactivée sur cette sonde ou ce compte SIP.")
@@ -1321,6 +1361,9 @@ class Agent:
                     if rid in self.calls:
                         raise ValueError("Duplicate execution")
                     call = ProbeCall(account, rid, payload["duration_s"])
+                    call.jitter_profile = payload.get("jitter_profile")
+                    if payload.get("network_test_settings") is not None and os.name != "nt":
+                        call.network_settings = validate_settings(payload["network_test_settings"])
                     identification = payload.get("dtmf")
                     if identification is not None:
                         protocol = identification.get("protocol") if isinstance(identification, dict) else None
@@ -1718,7 +1761,16 @@ class Agent:
 
     def run(self, *, enable_web=True, install_signals=True, export_management=True):
         # Portable mode never constructs the administrative HTTP server.
-        web_server = build_server(self) if enable_web else None
+        self.local_web = LocalWebService(self) if enable_web else None
+        def network_changed(usable):
+            self.inbox.put(("network_changed", usable))
+            if usable:
+                for account_id, account in list(self.accounts.items()):
+                    hosts = tuple(account.config.get(key) for key in ("server", "registrar", "proxy"))
+                    sources = set().union(*(trusted_pbx_addresses(host) for host in hosts if host))
+                    self.inbox.put(("network_trust", (account_id, account, hosts, sources)))
+        monitor = NetworkMonitor(network_changed)
+        self.network_recovery_due = None
         threads = [threading.Thread(target=self.communication, daemon=True)]
         wss_ready = threading.Event()
         wss_state = {}
@@ -1735,8 +1787,10 @@ class Agent:
             asyncio.run(execute_wss())
 
         threads.append(threading.Thread(target=run_wss, daemon=True))
-        if web_server:
-            threads.append(threading.Thread(target=web_server.serve_forever, daemon=True))
+        if self.local_web:
+            threads.append(threading.Thread(target=self.local_web.run, daemon=True))
+        if platform.system() == "Linux":
+            threads.append(threading.Thread(target=monitor.run, daemon=True))
         if export_management:
             threads.append(threading.Thread(target=self.management_export, daemon=True))
         for thread in threads:
@@ -1755,7 +1809,15 @@ class Agent:
                 self.endpoint.libHandleEvents(10)
                 try:
                     kind, value = self.inbox.get_nowait()
-                    if kind == "config":
+                    if kind == "network_changed":
+                        self.poll_now.set()
+                        self.network_recovery_due = time.monotonic() + 1 if value else None
+                        self.journal.record("network", "Changement réseau détecté", usable=value)
+                    elif kind == "network_trust":
+                        account_id, account, hosts, sources = value
+                        if self.accounts.get(account_id) is account and hosts == tuple(account.config.get(key) for key in ("server", "registrar", "proxy")):
+                            account.trusted_sources = sources
+                    elif kind == "config":
                         if value[0] == self.connection_generation:
                             self.apply_config(value[1])
                     elif kind == "revoked":
@@ -1772,8 +1834,18 @@ class Agent:
                     self.last_error = "SIP configuration could not be applied"
                     self.remote_fingerprint = None
                 now = time.monotonic()
+                if self.network_recovery_due is not None and now >= self.network_recovery_due:
+                    try:
+                        self.endpoint.handleIpChange(pj.IpChangeParam())
+                        self.network_recovery_due = None
+                        self.journal.record("network", "Reprise des transports SIP demandée")
+                    except pj.Error:
+                        self.network_recovery_due = now + 5
                 self.respond_incoming()
                 for rid, call in list(self.calls.items()):
+                    if call.jitter_profile_error and not call.finished:
+                        call.reason = call.jitter_profile_error
+                        call.hangup_safe()
                     call.identification_tick()
                     if call.answer_at is not None and now >= call.answer_at and not call.finished:
                         call.answer_at = None
@@ -1826,9 +1898,9 @@ class Agent:
             call = None
             a = None
             gc.collect()
-            if web_server:
-                web_server.shutdown()
-                web_server.server_close()
+            monitor.stop()
+            if self.local_web:
+                self.local_web.stop()
             # Enrollment may have two bounded ten-second requests in flight.
             deadline = time.monotonic() + 25
             for thread in threads:

@@ -7,7 +7,8 @@ def main():
     try:
         path=Path(os.environ.get('CONFIG_FILE','/var/lib/voiceprobe/config.json'));config=json.loads(path.read_text());status=json.loads((path.parent/'.management-status.json').read_text())
         assert time.time()-status['sampled_at']<15 and status['pjsip_version']=='2.16'
-        host=config.get('bind','127.0.0.1');host='127.0.0.1' if host=='0.0.0.0' else host
+        host=config.get('bind','127.0.0.1');host='127.0.0.1' if host in ('auto','0.0.0.0') else '::1' if host=='::' else host
+        if ':' in host:host='['+host+']'
         secure=bool(config.get('tls_cert'));url=('https' if secure else 'http')+'://'+host+':'+str(config.get('port',18441))+'/login'
         context=ssl.create_default_context(cafile=config['tls_cert']) if secure else ssl.create_default_context()
         opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPSHandler(context=context))

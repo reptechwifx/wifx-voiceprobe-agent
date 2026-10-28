@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -244,7 +245,7 @@ class SharedEngineHooksTest(unittest.TestCase):
     def test_portable_run_does_not_construct_server_install_signals_or_export_status(self):
         agent = self.engine()
         agent.before_iteration = agent.request_stop
-        with patch.object(self.main, 'build_server') as server, patch.object(self.main.signal, 'signal') as signals:
+        with patch.object(self.main, 'LocalWebService') as server, patch.object(self.main.signal, 'signal') as signals:
             agent.run(enable_web=False, install_signals=False, export_management=False)
         server.assert_not_called(); signals.assert_not_called(); agent.management_export.assert_not_called()
         agent.endpoint.libDestroy.assert_called_once(); agent.db.close.assert_called_once()
@@ -286,6 +287,8 @@ class SharedEngineHooksTest(unittest.TestCase):
             with self.subTest(state=server_state):
                 agent = self.portable.PortableAgent.__new__(self.portable.PortableAgent)
                 agent.running = True; agent.cfg = {'controller_url': 'https://controller.example', 'token': 'T'*80, 'ca_file': True}
+                agent.persistent = False
+                agent.poll_now = threading.Event()
                 agent.lease = PortableLease(); agent.inbox = queue.Queue()
                 response = Mock(status_code=403, content=b'{}')
                 response.json.return_value = {'portable_state': server_state, 'message': 'never displayed'}

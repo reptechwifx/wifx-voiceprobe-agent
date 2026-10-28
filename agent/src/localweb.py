@@ -78,8 +78,41 @@ class Sessions:
             self.failures.pop(ip, None)
 
 
-def build_server(agent):
+DEFAULT_MANAGEMENT_NETWORKS = ('127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12',
+                               '192.168.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10')
+
+
+def automatic_bind(cfg):
+    return cfg.get('bind', 'auto') in ('auto', '', None)
+
+
+def management_peer_allowed(cfg, peer):
+    networks = cfg.get('management_allowed_networks')
+    if networks is None and automatic_bind(cfg):
+        networks = DEFAULT_MANAGEMENT_NETWORKS
+    if networks is None:
+        return True  # Preserve an existing explicit bind's policy.
+    address = ipaddress.ip_address(peer.split('%', 1)[0])
+    address = getattr(address, 'ipv4_mapped', None) or address
+    return any(address in ipaddress.ip_network(net) for net in networks)
+
+
+class IPv6HTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+
+def build_server(agent, *, bind=None):
     cfg = agent.cfg
+    networks = cfg.get('management_allowed_networks')
+    if networks is not None:
+        if not isinstance(networks, (list, tuple)) or len(networks) > 64:
+            raise ValueError('Invalid management ACL')
+        for network in networks:
+            ipaddress.ip_network(network)  # Fail closed before opening any listener.
     cookie_name = COOKIE + '_' + hashlib.sha256(str(cfg['id']).encode()).hexdigest()[:16]
     use_tls = bool(cfg.get('tls_cert'))
     if not use_tls and not cfg.get('allow_http'):
@@ -159,6 +192,9 @@ def build_server(agent):
             return redact(data, _secret_values(agent.cfg))
 
         def safe_request(self):
+            if not management_peer_allowed(cfg, self.client_address[0]):
+                self.response(403, 'Source hors du réseau de gestion autorisé.')
+                return False
             if use_tls:
                 return True
             if not ipaddress.ip_address(self.client_address[0]).is_private:
@@ -304,17 +340,63 @@ def build_server(agent):
                 message = messages.get(str(error), str(error)) if isinstance(error, ValueError) else 'Configuration indisponible pendant un appel actif. Réessayez après les appels.'
                 self.response(422, self.page('error.html', {'error': redact(message, _secret_values(agent.cfg))}))
 
-    server = ThreadingHTTPServer((cfg.get('bind', '127.0.0.1'), cfg.get('port', 8080)), Handler)
+    address = bind if bind is not None else ('0.0.0.0' if automatic_bind(cfg) else cfg['bind'])
+    server_type = IPv6HTTPServer if ':' in address else ThreadingHTTPServer
+    server = server_type((address, cfg.get('port', 18441)), Handler)
     server.daemon_threads = True
     server.sessions = sessions
     server.cookie_name = cookie_name
     if use_tls:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(cfg['tls_cert'], cfg['tls_key'])
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        try:
+            context.load_cert_chain(cfg['tls_cert'], cfg['tls_key'])
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+        except Exception:
+            server.server_close()
+            raise
     return server
 
 
 def serve(agent):
     build_server(agent).serve_forever()
+
+
+class LocalWebService:
+    """Retry unavailable listeners without stopping media or relaxing a bind/ACL."""
+    def __init__(self, agent, retry_s=5):
+        self.agent, self.retry_s = agent, retry_s
+        self.stop_event = threading.Event()
+        self.servers = {}
+        self.status = 'starting'
+
+    def run(self):
+        try:
+            while not self.stop_event.is_set():
+                cfg = self.agent.cfg
+                addresses = ['0.0.0.0'] if automatic_bind(cfg) else [cfg['bind']]
+                if automatic_bind(cfg) and socket.has_ipv6:
+                    addresses.append('::')
+                for address in addresses:
+                    if address in self.servers:
+                        continue
+                    try:
+                        server = build_server(self.agent, bind=address)
+                    except (OSError, RuntimeError, ValueError):
+                        continue
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    self.servers[address] = (server, thread)
+                    thread.start()
+                self.status = ('ready' if len(self.servers) == len(addresses) else
+                               'partial' if self.servers else 'unavailable')
+                self.stop_event.wait(self.retry_s)
+        finally:
+            for server, thread in self.servers.values():
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+            self.servers.clear()
+            self.status = 'stopped'
+
+    def stop(self):
+        self.stop_event.set()

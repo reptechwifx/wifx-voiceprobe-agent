@@ -96,6 +96,7 @@ class ConfigurationTest(unittest.TestCase):
         call.dtmf_frame = "numeric-v2"
         call.dtmf_expected = None
         call.audio_phase_started = True
+        call.network_settings = None
         call.network_peer = None
         call.network_started = set()
         call._start_network_diagnostic = Mock(side_effect=lambda method: call.network_started.add(method))

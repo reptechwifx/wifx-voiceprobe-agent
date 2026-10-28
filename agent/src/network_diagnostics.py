@@ -7,6 +7,9 @@ Neither adapter writes to a media transport.
 import datetime
 import ipaddress
 import os
+import math
+import statistics
+import time
 import re
 import shutil
 import subprocess
@@ -29,6 +32,39 @@ _POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vp-network")
 _SLOTS = threading.BoundedSemaphore(2)
 _PORT_LOCK = threading.Lock()
 _USED_PORTS = set()
+_LAST_STARTED = {}
+SETTINGS = {'icmp_enabled': True, 'udp_enabled': True, 'probes_per_hop': 10, 'max_hops': 20,
+            'probe_timeout_ms': 500, 'interval_ms': 20, 'warning_ms': 30, 'critical_ms': 100,
+            'deadline_s': 16, 'udp_port': 65000, 'profile': 'standard', 'min_interval_s': 60}
+LIMITS = {'probes_per_hop': (1, 10), 'max_hops': (1, 20), 'probe_timeout_ms': (20, 2000),
+          'interval_ms': (10, 1000), 'warning_ms': (1, 10000), 'critical_ms': (1, 10000),
+          'deadline_s': (1, 20), 'udp_port': (1024, 65535), 'min_interval_s': (10, 3600)}
+
+
+def validate_settings(values):
+    if not isinstance(values, dict) or set(values) != set(SETTINGS):
+        raise ValueError('Incomplete network diagnostic settings')
+    for name, (minimum, maximum) in LIMITS.items():
+        if type(values[name]) is not int or not minimum <= values[name] <= maximum:
+            raise ValueError('Invalid network diagnostic setting: ' + name)
+    if any(type(values[name]) is not bool for name in ('icmp_enabled', 'udp_enabled')):
+        raise ValueError('Invalid network diagnostic activation')
+    if values['profile'] not in ('standard', 'deep') or values['warning_ms'] >= values['critical_ms']:
+        raise ValueError('Invalid network diagnostic profile or thresholds')
+    return dict(values)
+
+
+def rtt_statistics(times, missed, settings):
+    ordered = sorted(times)
+    count = len(ordered)
+    return {'sample_count': count, 'timeouts': missed, 'rtt_samples_ms': times,
+            'rtt_median_ms': statistics.median(ordered) if count else None,
+            'rtt_p95_ms': ordered[math.ceil(.95 * count) - 1] if count else None,
+            'rtt_p99_ms': ordered[math.ceil(.99 * count) - 1] if count else None,
+            'above_warning': sum(value > settings['warning_ms'] for value in times),
+            'above_critical': sum(value > settings['critical_ms'] for value in times),
+            'no_response_percent': 100 * missed / (count + missed) if count + missed else None}
+
 
 
 def observed_peer(address):
@@ -50,15 +86,21 @@ def observed_peer(address):
     return str(ip)
 
 
-def unavailable(reason, method="udp", peer=None):
-    return {"method": method, "status": "unavailable", "reason": reason,
+def unavailable(reason, method="udp", peer=None, settings=None):
+    result = {"method": method, "status": "unavailable", "reason": reason,
             "peer": peer, "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "parameters": {"probes_per_hop": PROBES_PER_HOP, "max_hops": MAX_HOPS,
                            "packet_bytes": PROBE_BYTES, "packet_size_scope": "IP packet including transport header",
                            "dscp": PROBE_DSCP, "timeout_s": TIMEOUT_SECONDS}, "hops": []}
+    if settings is not None:
+        settings = validate_settings(settings)
+        result['parameters'].update(settings)
+        result['parameters'].update(protocol=2, timeout_s=settings['deadline_s'],
+                                    percentile_method='nearest-rank', max_probes=settings['max_hops'] * settings['probes_per_hop'])
+    return result
 
 
-def _parse_report(output):
+def _parse_report(output, settings=None):
     """Parse the bounded numeric output of Linux traceroute 2.1.x."""
     hops = []
     for line in output.splitlines():
@@ -86,11 +128,13 @@ def _parse_report(output):
                      "rtt_avg_ms": round(sum(times) / len(times), 3) if times else None,
                      "rtt_max_ms": round(max(times), 3) if times else None,
                      "status": "responded" if times else "no_response"})
+        if settings is not None:
+            hops[-1].update(rtt_statistics(times, missed, settings))
     return hops
 
 
-def _run(method, peer, local_port=65001):
-    result = unavailable("pending", method, peer)
+def _run(method, peer, local_port=65001, settings=None):
+    result = unavailable("pending", method, peer, settings)
     if os.name == "nt":
         if method != "icmp":
             result.update(status="unavailable", reason="udp_requires_admin_on_windows")
@@ -112,29 +156,38 @@ def _run(method, peer, local_port=65001):
     if binary is None:
         result.update(status="unavailable", reason="traceroute_absent")
         return result
-    arguments = [binary, "-n", "-q", str(PROBES_PER_HOP), "-m", str(MAX_HOPS), "-N", "1",
+    parameters = settings or SETTINGS
+    arguments = [binary, "-n", "-q", str(parameters['probes_per_hop']), "-m", str(parameters['max_hops']), "-N", "1",
                  "-t", str(MEDIA_DSCP << 2)]
     if method == "udp":
-        arguments.extend(["-U", "--sport=" + str(local_port), "-p", str(DIAGNOSTIC_PORT)])
+        arguments.extend(["-U", "--sport=" + str(local_port), "-p", str(parameters['udp_port'])])
     else:
         arguments.append("-I")
-    arguments.extend(["-w", "0.5", peer, str(PROBE_BYTES)])
+    if settings is not None:
+        # Disable adaptive timeout multipliers; report the exact requested wait.
+        arguments.extend(['-z', str(settings['interval_ms'] / 1000)])
+    wait = str(parameters['probe_timeout_ms'] / 1000) + ',0,0' if settings is not None else '0.5'
+    arguments.extend(["-w", wait, peer, str(PROBE_BYTES)])
     try:
-        process = subprocess.run(arguments, capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
-                                 check=False, shell=False)
+        process = subprocess.run(arguments, capture_output=True, text=True, timeout=parameters['deadline_s'],
+                                 check=False, shell=False, env={**os.environ, 'LC_ALL': 'C'})
         if process.returncode:
             reason = ("icmp_permission_denied" if method == "icmp" and
                       ("Operation not permitted" in process.stderr or "not enough privileges" in process.stderr)
                       else "traceroute_failed")
             result.update(status="unavailable", reason=reason)
             return result
-        hops = _parse_report(process.stdout)
+        hops = _parse_report(process.stdout, settings)
         if not hops:
             result.update(status="unavailable", reason="no_hops_returned")
             return result
         result.update(status="complete", reason=None, hops=hops)
-    except subprocess.TimeoutExpired:
-        result.update(status="unavailable", reason="timeout")
+    except subprocess.TimeoutExpired as error:
+        output = error.stdout or ''
+        if isinstance(output, bytes):
+            output = output.decode('utf-8', errors='replace')
+        hops = _parse_report(output, settings) if settings is not None else []
+        result.update(status="partial" if hops else "unavailable", reason="timeout", hops=hops)
     except PermissionError:
         result.update(status="unavailable", reason="icmp_permission_denied" if method == "icmp" else "udp_permission_denied")
     except (OSError, UnicodeError, ValueError) as error:
@@ -142,18 +195,26 @@ def _run(method, peer, local_port=65001):
     return result
 
 
-def start(method, peer):
+def start(method, peer, settings=None):
     if method not in ("udp", "icmp") or observed_peer(f"[{peer}]:1" if ":" in peer else f"{peer}:1") != peer:
         raise ValueError("Diagnostics require an observed numeric RTP peer")
+    if settings is not None:
+        settings = validate_settings(settings)
+        if not settings[method + '_enabled']:
+            return None
     if not _SLOTS.acquire(blocking=False):
         return None
     with _PORT_LOCK:
+        if settings is not None and time.monotonic() - _LAST_STARTED.get(method, -float('inf')) < settings['min_interval_s']:
+            _SLOTS.release()
+            return None
+        _LAST_STARTED[method] = time.monotonic()
         local_port = next(port for port in LOCAL_PORTS if port not in _USED_PORTS)
         _USED_PORTS.add(local_port)
 
     def task():
         try:
-            return _run(method, peer, local_port)
+            return _run(method, peer, local_port, settings)
         finally:
             with _PORT_LOCK:
                 _USED_PORTS.remove(local_port)

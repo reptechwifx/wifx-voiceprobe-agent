@@ -96,9 +96,9 @@ class DiagnosticTest(unittest.TestCase):
         for category,text in [('tls','Certificat'),('timeout','délai'),('network_dns','DNS'),('http','refusée')]:
             message=portable_diagnostic({'controller_error_category':category,'last_error':'Bearer SECRET'}, {'state':'authorized'})
             self.assertIn(text,message); self.assertNotIn('SECRET',message)
-        self.assertIn('Appel établi, mais aucun média reçu.',portable_diagnostic({'media_evidence':'no_rtp'}, {'state':'authorized'}))
+        self.assertEqual('',portable_diagnostic({'media_evidence':'no_rtp'}, {'state':'authorized'}))
         self.assertNotIn('pare-feu',portable_diagnostic({'media_evidence':'no_rtp'}, {'state':'authorized'}))
-        self.assertIn('qualité dégradée',portable_diagnostic({'media_evidence':'degraded'}, {'state':'authorized'}))
+        self.assertEqual('',portable_diagnostic({'media_evidence':'degraded'}, {'state':'authorized'}))
 
     def test_ticket_is_sanitized_independently_from_backend_content(self):
         for reference,expected in [('WSUP-123','WSUP-123'),('password SECRET',''),('WSUP-99999999','')]:
@@ -154,20 +154,22 @@ class PersistentEngineHooksTest(unittest.TestCase):
             agent.calls={'live':object()};config['accounts'][0]['transport']='udp'
             agent.apply_config(config);self.assertEqual(2,shared.call_count)
 
-    def test_media_diagnostic_requires_actual_received_packets_or_analyzed_audio(self):
+    def test_completed_reports_aggregate_observations_without_local_quality_judgment(self):
         from unittest.mock import patch
+        from session_metrics import SessionMetrics
         agent=self.portable.PortableAgent.__new__(self.portable.PortableAgent)
         agent.completed_tests=0
-        cases=[({'established':True,'rtp':{'rx':{'packets':0}}},'no_rtp'),
-               ({'established':False,'rtp':{'rx':{'packets':0}}},None),
-               ({'established':True,'rtp':{},'audio':{'interrupted_s':4}},None),
-               ({'established':True,'rtp':{'rx':{'packets':20}},'audio':{'interrupted_s':0}},None),
-               ({'established':True,'rtp':{'rx':{'packets':20}},'audio':{'interrupted_s':1}},'degraded')]
-        with patch.object(self.main.Agent,'pending_report'):
-            for metrics,expected in cases:
+        agent.session_metrics=SessionMetrics()
+        reports=[{'established':True,'rtp':{'rx':{'packets':0}}},
+                 {'established':True,'rtp':{'rx':{'packets':20,'loss':2}}}]
+        with patch.object(self.main.Agent,'pending_report') as pending:
+            for metrics in reports:
                 agent.pending_report('fixture',metrics)
-                self.assertEqual(expected,agent._media_evidence)
-        self.assertEqual(len(cases),agent.completed_tests)
+                pending.assert_called_with('fixture',metrics)
+                self.assertFalse(hasattr(agent,'_media_evidence'))
+        self.assertEqual(2,agent.completed_tests)
+        self.assertEqual(2,agent.session_metrics.snapshot()['tests'])
+        self.assertAlmostEqual(100*2/22,agent.session_metrics.snapshot()['loss_percent'])
 
     def test_windows_startup_is_installed_only_after_adoption_and_not_removed_on_disconnect(self):
         from types import SimpleNamespace
