@@ -22,7 +22,7 @@ def prepare(path, password=None, retain_credentials=True):
     path.parent.chmod(0o700)
     password = password or generate_password()
     password_hash = hash_password(password)
-    cfg = {'id': str(uuid.uuid4()), 'name': socket.gethostname()[:100], 'controller_url': '', 'wss_url': '', 'token': '', 'ca_file': '/etc/ssl/certs/ca-certificates.crt', 'local_password_hash': password_hash, 'max_calls': 4, 'bind': '0.0.0.0', 'port': 18441, 'allow_http': True, 'administrative': {}, 'adoption_state': 'unconfigured', 'installation_type': 'native'}
+    cfg = {'id': str(uuid.uuid4()), 'name': socket.gethostname()[:100], 'controller_url': '', 'wss_url': '', 'token': '', 'ca_file': '/etc/ssl/certs/ca-certificates.crt', 'local_password_hash': password_hash, 'max_calls': 4, 'bind': 'auto', 'port': 18441, 'allow_http': True, 'administrative': {}, 'adoption_state': 'unconfigured', 'installation_type': 'native'}
     cfg.update(create_identity(path.parent))
     atomic_json(path, cfg)
     if retain_credentials:

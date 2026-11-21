@@ -35,7 +35,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-INSTALLER_VERSION = '1.0.4'
+INSTALLER_VERSION = '1.0.5'
 MAX_ARTIFACT = 1024 * 1024 * 1024
 MIN_FREE = 512 * 1024 * 1024
 
@@ -653,7 +653,7 @@ class Container:
 try:
  p='/var/lib/voiceprobe/';c=json.load(open(p+'config.json'));s=json.load(open(p+'.management-status.json'))
  assert time.time()-s['sampled_at']<15 and s['pjsip_version']=='2.16'
- h=c.get('bind','127.0.0.1');h='127.0.0.1' if h=='0.0.0.0' else h
+ h=c.get('bind','127.0.0.1');h='127.0.0.1' if h in ('0.0.0.0','auto','::') else h
  u=('https' if c.get('tls_cert') else 'http')+'://'+h+':'+str(c.get('port',18441))+'/login'
  context=ssl.create_default_context(cafile=c['tls_cert']) if c.get('tls_cert') else None
  r=urllib.request.urlopen(u,context=context,timeout=3);assert r.status==200
@@ -1139,16 +1139,17 @@ class Manager:
             password=''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789') for _ in range(28))
         need(16<=len(password)<=200,'Mot de passe de16à200 caractères requis.')
         controller=https_url(self.args.controller or 'https://vp.wifx.net')
-        bind=self.args.bind or lan_address()
-        address=ipaddress.ip_address(bind)
-        need(address.version==4 and (address.is_private or address.is_loopback) and not address.is_unspecified,
-             'Écoute administrative limitée à une IPv4 privée/loopback ; 0.0.0.0 et IPv6 publique refusés pour une nouvelle installation.')
+        bind=self.args.bind or "auto"
+        if bind != 'auto':
+            address=ipaddress.ip_address(bind)
+            need(address.version==4 and (address.is_private or address.is_loopback) and not address.is_unspecified,
+                 'Écoute administrative : auto ou IPv4 privée/loopback requise.')
         ports={'port':self.args.port,'sip_port':self.args.sip_port,'rtp_base_port':self.args.rtp_base_port or self.available_rtp_base()}
         need(1024<=ports['port']<=65535 and 1024<=ports['sip_port']<=65535 and 1024<=ports['rtp_base_port']<=62000,
              'Ports Agent hors limites.')
         for typ,port in [(socket.SOCK_STREAM,ports['port']),(socket.SOCK_STREAM,ports['sip_port']),(socket.SOCK_DGRAM,ports['sip_port'])]:
             with socket.socket(socket.AF_INET,typ) as check:
-                try:check.bind((bind if port==ports['port'] else '0.0.0.0',port))
+                try:check.bind((bind if port==ports['port'] and bind!='auto' else '0.0.0.0',port))
                 except OSError:raise Failure('Port HTTP/SIP occupé ; aucune ressource existante arrêtée. Choisir des ports distincts.') from None
         for port in range(ports['rtp_base_port'],ports['rtp_base_port']+3180):
             with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as check:
@@ -1192,7 +1193,7 @@ m.atomic_json(p,c)
                 (not adopted or status.get('wss_connected') is True) and
                 len([a for a in status.get('accounts',[]) if a.get('registration_code')==200 and a.get('registration_active') is True])>=expected_accounts):
                 try:
-                    host=previous_cfg.get('bind','127.0.0.1');scheme='https' if previous_cfg.get('tls_cert') else 'http'
+                    host=previous_cfg.get('bind','127.0.0.1');host='127.0.0.1' if host in ('auto','0.0.0.0','::') else host;scheme='https' if previous_cfg.get('tls_cert') else 'http'
                     connection=http.client.HTTPSConnection(host,previous_cfg.get('port',18441),context=ssl.create_default_context(cafile=self.data_path(previous_cfg['tls_cert'])),timeout=3) if scheme=='https' else http.client.HTTPConnection(host,previous_cfg.get('port',18441),timeout=3)
                     connection.request('GET','/login');response=connection.getresponse();response.read();connection.close()
                     if response.status==200:
@@ -1423,7 +1424,7 @@ exit 0
         print('\nWIFX Voice Probe Agent\n'+('Installation terminée.' if created else 'Mise à jour vérifiée.'))
         print('Version : '+manifest['version']+'\nÉtat : ACTIF\nController : '+cfg['controller_url'])
         if getattr(self,'launcher',None):print('Gestion : sudo '+self.launcher)
-        print('Interface : '+scheme+'://'+cfg.get('bind','127.0.0.1')+':'+str(cfg.get('port',18441)))
+        print('Interface : '+scheme+'://'+('127.0.0.1' if cfg.get('bind')=='auto' else cfg.get('bind','127.0.0.1'))+':'+str(cfg.get('port',18441)))
         if created and self.password and not self.args.non_interactive:
             with open('/dev/tty','w') as terminal:
                 terminal.write('\nUtilisateur : admin\nMot de passe : '+self.password+'\nConservez ces identifiants ; ce mot de passe ne sera pas réaffiché.\n');terminal.flush()
@@ -1440,7 +1441,7 @@ exit 0
         for key,label in fields.items():print(label+' : '+str(status.get(key)))
         accounts=status.get('accounts',[])
         print('Service : '+('ACTIF' if running else 'INACTIF')+'\nComptes SIP : '+str(len(accounts))+' ; enregistrés : '+str(sum(a.get('registration_active') is True and a.get('registration_code')==200 for a in accounts)))
-        cfg=private_json(self.cfg);print('Interface : '+('https' if cfg.get('tls_cert') else 'http')+'://'+cfg.get('bind','127.0.0.1')+':'+str(cfg.get('port',18441)))
+        cfg=private_json(self.cfg);print('Interface : '+('https' if cfg.get('tls_cert') else 'http')+'://'+('127.0.0.1' if cfg.get('bind')=='auto' else cfg.get('bind','127.0.0.1'))+':'+str(cfg.get('port',18441)))
         print('Dernière mise à jour : '+str(self.settings.get('last_update','historique/non gérée')))
         if self.args.action=='diagnose':
             print('Stockage disponible : '+str(shutil.disk_usage(self.data).free)+' octets ; protocole maintenance : '+str(status.get('maintenance',{}).get('protocol','absent')))
@@ -1459,10 +1460,18 @@ exit 0
         except sqlite3.Error:
             raise Failure('État des rapports illisible : version actuelle conservée.') from None
 
+    def assert_rollback_network_compatibility(self, target):
+        cfg=private_json(self.cfg)
+        if cfg.get('bind')!='auto' and 'management_allowed_networks' not in cfg:return
+        version=re.fullmatch(r'0\.9-([0-9]{3})',str(target.get('version','')))
+        need(version is not None and int(version.group(1))>=28,
+             'Rollback refusé : la version cible ne prend pas en charge le bind automatique ou les ACL locales actuelles. Configuration et service conservés ; ne pas supprimer une restriction de sécurité pour forcer le retour.')
+
     def rollback(self):
         previous=self.settings.get('previous');need(previous and previous.get('backend'),'Aucune version précédente qualifiée disponible.')
         need(previous.get('release',{}).get('data_schema')==1 and self.settings['release'].get('rollback_compatible') is True,
              'Retour de schéma non qualifié ; aucune restauration destructive.')
+        self.assert_rollback_network_compatibility(previous['release'])
         self.verify_backup(previous['backup']);self.previous=self.backend.capture();proof=self.persistent_proof()
         current=self.settings['release'];expected=self.expected_accounts()
         state={'phase':'prepared','settings_before':json.loads(json.dumps(self.settings)),'previous':self.previous,'target':previous['release'],'operation':'rollback'}
@@ -1552,9 +1561,10 @@ exit 0
                 url=https_url(self.args.controller);updated.update({'controller_url':url,'wss_url':'wss://'+urllib.parse.urlsplit(url).netloc+'/ws','token':'','adoption_state':'unconfigured'})
                 updated.pop('credential_ack_pending',None);updated.pop('metadata_authority',None)
             if self.args.bind:
-                ip=ipaddress.ip_address(self.args.bind)
-                need(ip.version==4 and not ip.is_unspecified and (ip.is_private or ip.is_loopback),'Adresse administrative privée IPv4 ou loopback requise.')
-                updated['bind']=str(ip)
+                if self.args.bind != 'auto':
+                    ip=ipaddress.ip_address(self.args.bind)
+                    need(ip.version==4 and not ip.is_unspecified and (ip.is_private or ip.is_loopback),'Adresse administrative privée IPv4 ou loopback requise.')
+                updated['bind']=self.args.bind
             for option,key in [('--port','port'),('--sip-port','sip_port'),('--rtp-base-port','rtp_base_port')]:
                 if option in self.args.provided:
                     value=getattr(self.args,key);need(value and 1024<=value<=(62000 if key=='rtp_base_port' else 65535),'Port hors limites.');updated[key]=value

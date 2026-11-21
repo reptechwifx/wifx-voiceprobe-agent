@@ -41,9 +41,9 @@ class CommandDiagnosticTest(unittest.TestCase):
         self.assertIn('run',self.a.prepared)
 
     def test_real_local_capacity_separate_from_account_capacity(self):
-        self.a.calls={str(i):types.SimpleNamespace(account=object()) for i in range(4)}
+        self.a.calls={str(i):types.SimpleNamespace(account=object(), finished=False) for i in range(4)}
         self.rejected('AGENT_CAPACITY_EXHAUSTED:')
-        self.a.db.execute('DELETE FROM commands');self.a.calls={'one':types.SimpleNamespace(account=self.account)};self.account.config['max_calls']=1
+        self.a.db.execute('DELETE FROM commands');self.a.calls={'one':types.SimpleNamespace(account=self.account, finished=False)};self.account.config['max_calls']=1
         self.rejected('ACCOUNT_CAPACITY_EXHAUSTED:')
 
     def test_maintenance_and_cpu_are_never_presented_as_capacity(self):
@@ -64,6 +64,19 @@ class CommandDiagnosticTest(unittest.TestCase):
         self.command['payload']['server']='wrong.test';self.rejected('SIP_SERVER_MISMATCH:')
         self.a.db.execute('DELETE FROM commands');self.command['payload']['server']='pbx.test';self.account.config.pop('destination_policy');self.rejected('LEGACY_DESTINATION_DENIED:')
         self.a.db.execute('DELETE FROM commands');self.account.config['destination_policy']='account-public-v1';self.command['payload']['destination']='+41225550123';self.rejected('PUBLIC_CALLS_DISABLED:')
+
+    def test_jitter_profile_requires_qualified_binding_and_preserves_requested_parameters(self):
+        self.command['payload']['jitter_profile'] = {'mode': 'fixed', 'initial_ms': 40, 'min_prefetch_ms': 40,
+            'max_prefetch_ms': 40, 'capacity_ms': 200, 'discard_algorithm': 0}
+        self.a.pjsip_version = '2.17'
+        self.rejected('JITTER_PROFILE_UNSUPPORTED:')
+        self.assertNotIn('run', self.a.prepared)
+        self.a.db.execute('DELETE FROM commands')
+        self.a.pjsip_version = '2.16'
+        with patch.object(main, 'jitter_profiles_supported', return_value=True):
+            self.a.execute(self.command)
+        self.assertEqual((1, None), self.a.db.execute('SELECT ok,error FROM commands').fetchone())
+        self.assertEqual(self.a.prepared['run']['jitter_profile'], self.command['payload']['jitter_profile'])
 
 
 if __name__ == '__main__':

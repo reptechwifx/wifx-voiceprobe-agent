@@ -537,6 +537,21 @@ class LauncherCoexistence(unittest.TestCase):
             self.assertEqual('# foreign\n',alias.read_text())
 
 
+class NetworkRollbackCompatibility(unittest.TestCase):
+    def test_legacy_rollback_preserves_current_network_security_before_any_stop(self):
+        with tempfile.TemporaryDirectory() as folder:
+            manager=object.__new__(m.Manager)
+            manager.cfg=Path(folder)/'config.json'
+            for cfg in ({'bind':'auto'}, {'bind':'0.0.0.0','management_allowed_networks':[]},
+                        {'bind':'127.0.0.1','management_allowed_networks':['127.0.0.0/8']}):
+                m.atomic(manager.cfg,cfg)
+                with self.assertRaises(m.Failure):manager.assert_rollback_network_compatibility({'version':'0.9-027'})
+                self.assertEqual(cfg,json.loads(manager.cfg.read_text()))
+                manager.assert_rollback_network_compatibility({'version':'0.9-028'})
+            m.atomic(manager.cfg,{'bind':'127.0.0.1'})
+            manager.assert_rollback_network_compatibility({'version':'0.9-027'})
+
+
 class IncomingRollbackCompatibility(unittest.TestCase):
     def test_legacy_binary_is_not_started_with_an_autonomous_report_still_pending(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -607,7 +622,12 @@ class DockerDiagnosticPermissions(unittest.TestCase):
         with patch.object(m.os,'fchown'),patch.object(m.os,'fchmod'):
             with self.assertRaisesRegex(m.Failure,'POSIX non conformes'):m.diagnostic_permissions(self.path,0o755,normalize=True)
         self.owner.stop()
-        with self.assertRaisesRegex(m.Failure,'propriétaire root'):m.diagnostic_permissions(self.path,0o755)
+        original=os.fstat
+        def foreign_owner(fd):
+            info=original(fd)
+            return types.SimpleNamespace(**{k:getattr(info,k) for k in ('st_mode','st_nlink','st_dev','st_ino','st_gid')},st_uid=1001)
+        with patch.object(m.os,'fstat',side_effect=foreign_owner):
+            with self.assertRaisesRegex(m.Failure,'propriétaire root'):m.diagnostic_permissions(self.path,0o755)
         link=self.path.parent/'link';link.symlink_to(self.path,target_is_directory=True)
         with self.assertRaisesRegex(m.Failure,'symbolique'):m.diagnostic_permissions(link,0o755)
         program=self.path/'program';program.touch();os.link(program,self.path/'alias')
@@ -652,3 +672,28 @@ class DockerNetworkWorker(unittest.TestCase):
             with self.subTest(change=change):
                 altered=json.loads(json.dumps(item));altered['HostConfig'].update(change)
                 self.assertFalse(backend.network_worker_matches(altered,'signed-image','hash'))
+
+
+class AutomaticBindHealthcheck(unittest.TestCase):
+    def test_real_loopback_healthcheck_resolves_automatic_bind_and_rejects_stale_status(self):
+        spec=importlib.util.spec_from_file_location('healthcheck',Path(__file__).resolve().parents[1]/'installer/healthcheck.py')
+        health=importlib.util.module_from_spec(spec);spec.loader.exec_module(health)
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                self.send_response(200 if self.path=='/login' else 404);self.end_headers()
+        server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                path=Path(folder)/'config.json';status=path.parent/'.management-status.json'
+                from unittest.mock import patch
+                with patch.dict(os.environ,{'CONFIG_FILE':str(path)}):
+                    for bind in ['auto','0.0.0.0','127.0.0.1']:
+                        path.write_text(json.dumps({'bind':bind,'port':server.server_port}))
+                        status.write_text(json.dumps({'sampled_at':time.time(),'pjsip_version':'2.16'}))
+                        self.assertEqual(0,health.main())
+                    status.write_text(json.dumps({'sampled_at':0,'pjsip_version':'2.16'}))
+                    self.assertEqual(1,health.main())
+        finally:
+            server.shutdown();server.server_close();thread.join()
