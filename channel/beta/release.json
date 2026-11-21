@@ -2,11 +2,11 @@
   "schema": 1,
   "installer_protocol": 1,
   "installer_version": "1.0.5",
-  "sequence": 2026102801,
-  "expires": 1800946021,
-  "version": "0.9-028",
-  "release_id": "0.9-028-dbf221dd8c50",
-  "source_revision": "dbf221dd8c508dbcd78a6951d5cce0fea89353ec",
+  "sequence": 2026112101,
+  "expires": 1803032921,
+  "version": "0.9-029",
+  "release_id": "0.9-029-02caa3e7f127",
+  "source_revision": "02caa3e7f127a3949a9a092708d75eb1f157eea8",
   "development": false,
   "data_schema": 1,
   "rollback_compatible": true,
@@ -26,7 +26,8 @@
     "0.9-025",
     "0.9-026",
     "0.9-027",
-    "0.9-028"
+    "0.9-028",
+    "0.9-029"
   ],
   "legacy_main_sha256": [
     "4eb79eb3e132ca033689b75d06f559d9a012657ac0dfd14e5731b03b45a30a32"
@@ -37,15 +38,15 @@
     "sha256": "e06047f3fef684b6d7d3b7b5020b10ad2ac5d3e4085ec8f5bf32e3f983e844ca"
   },
   "agent": {
-    "name": "voiceprobe-agent-0.9-028-dbf221dd8c50.tar.gz",
-    "bytes": 193921,
-    "sha256": "0670c0e44475ba33ad2f78fd9b73b6ec4f129f8e645639164ac33e28b9b81c52"
+    "name": "voiceprobe-agent-0.9-029-02caa3e7f127.tar.gz",
+    "bytes": 171607,
+    "sha256": "77d65a432557c04d885bce51dc138a6806ef2cea1845eb1c95f66961414bcf27"
   },
   "runtimes": {
     "ubuntu-24.04-amd64-cp312": {
-      "name": "ubuntu-24.04-amd64-cp312-f1650f1bc415.tar.gz",
-      "bytes": 20112573,
-      "sha256": "f1650f1bc41511a35566db1a618a8f93da82cc8690186312026525f86345b3b9",
+      "name": "ubuntu-24.04-amd64-cp312-a909bea8a0ac.tar.gz",
+      "bytes": 20112093,
+      "sha256": "a909bea8a0ac32dbb8354caeca6952f8949622d5a2e106ec128175f2d1152b23",
       "python": "3.12",
       "soabi": "cpython-312-x86_64-linux-gnu",
       "glibc": "2.39",
@@ -73,9 +74,9 @@
       "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c"
     },
     "debian-12-amd64-cp311": {
-      "name": "debian-12-amd64-cp311-bfa6425672a7.tar.gz",
-      "bytes": 20358626,
-      "sha256": "bfa6425672a7bc4d694a93b0e36a51388ea4aa460c2f69414ac2c31b30c854a0",
+      "name": "debian-12-amd64-cp311-abb95f6a930b.tar.gz",
+      "bytes": 20358222,
+      "sha256": "abb95f6a930b66c2fb5faf4835653d0fafa0e8a1349d5c778f85d81451a8636a",
       "python": "3.11",
       "soabi": "cpython-311-x86_64-linux-gnu",
       "glibc": "2.36",
@@ -103,9 +104,9 @@
       "rtcp_arithmetic_sha256": "c3a707d73534a20f53db3a4a86c1a90d25c3d15ada06e17f07bd3bf7ed97771c"
     },
     "debian-13-arm64-cp313": {
-      "name": "debian-13-arm64-cp313-1de262e7e78d.tar.gz",
-      "bytes": 16495618,
-      "sha256": "1de262e7e78db5a60ddd94cf3e841561122f12547e71e5215c2a27f0d2d207ad",
+      "name": "debian-13-arm64-cp313-ddb9d4816f70.tar.gz",
+      "bytes": 16494945,
+      "sha256": "ddb9d4816f70f322c2bf55e7244e7dbef4eac532ceb0fa982af980f3b1768e0c",
       "python": "3.13",
       "soabi": "cpython-313-aarch64-linux-gnu",
       "glibc": "2.41",
@@ -133,65 +134,29 @@
     }
   },
   "docker": {
-    "name": "voiceprobe-agent-image-0.9-028-dbf221dd8c50.tar.gz",
-    "bytes": 332845161,
-    "sha256": "9318b554c332acda20aa2a41c42999412987f638ba4f82ebeede2c0a4289d4e2",
-    "reference": "voiceprobe-agent-runtime:0.9-028-dbf221dd8c50",
+    "name": "voiceprobe-agent-image-0.9-029-02caa3e7f127.tar.gz",
+    "bytes": 102124193,
+    "sha256": "f4cf50ed7d196b5277742de035eb901b938b8a25a06c2feed9f738fa93277305",
+    "reference": "voiceprobe-agent-runtime:0.9-029-02caa3e7f127",
     "image_ids": [
-      "sha256:5b3711f39ee8303217871ba51f36486914a3fec5daf01b5f2b07e4815569e3bd",
-      "sha256:5957e3cd07edf53273c2ddb6dc87967694a1e3519dd62fd9ec26edca0ca3dc88"
+      "sha256:afc8d05eff4a4600e70c67adc5d2c68d410d5fb024beb3b865fafe348273ddaa",
+      "sha256:f8a5a77c9b5fd24695a17f8552cbeef346f6cee69605b127e7bbdcda45e9ea6a"
     ],
     "rootfs_diff_ids": [
-      "sha256:e58989146fcec76699871403b9897b5c014af1ccd85f5a9300a215e7975525d7",
-      "sha256:1c9ac609ac753b2fae3426b10da2eb68eb65771256d7a46c529dc237e365fbb8",
-      "sha256:fb8e6d0ebbcb1b2fc84a6b5ba35769c6e0ec0f18dc813249af181d448ea73193",
-      "sha256:6ff6147cdbdc0bc7719d743d801e5a4b56bc6857ffbf5751e0c72cd5079089f2",
+      "sha256:1d7b9dd8778ebc4d9bf2f64436dd358640718cb349f5640b33bebaea4ffd62c2",
+      "sha256:223e2f83409961b00ded898870281b0f9e5a1b3268f6fb5544ae737bf6bff502",
+      "sha256:4614927bf540eecbfa972453694c7da882e4e4b2c771a8c04ea69a9b8d8e09c9",
+      "sha256:fcda03e2d0fec03143e98032d7fa707bf032c4c144b2bae19a3100ccd373f5f3",
       "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
-      "sha256:5078de4931103be7afc066b75550347102dc53e5737f4056fe38d5100a5bfcce",
-      "sha256:e63cb2561f6ea53ab1bb912cb4e198ed60f3d2bea92f2dfb916c1ecf0cc8f078",
-      "sha256:4e8ba6e5b75a5cabf8f62fd4d04d357907497bd1fc0d7edae93d8397f20cfd18",
-      "sha256:140e131fc942d711e5c5a43c696b1ff5df7b3e3001d76c270ee479a08efd13a4",
-      "sha256:73a9dde9d433a9d30c20065ce241bf242f8af1cd5346b346b7b340a2f411d1d1",
-      "sha256:a8f431dce125548be47bada8d62860afa5506bcbe4a7d89ddb9e66d68133a068",
-      "sha256:24f72e83c75db48f43043b10d0f68352d86d31aa85a9ebfbdb2544325ea4071b",
-      "sha256:f55b80637c2fd6e272874a885e7d04f795f69051881cb466e9246253c6bc15cc",
-      "sha256:5ae07b606c66e01803caabf2ac1200870a74b009cf5046f4dbf32d3291a06db9",
-      "sha256:15c99e444c182e99ad12942e9731adf40aa2767d8ed7cfe963da0221a71c0501",
-      "sha256:7e4dedf987d7889d178a15668bfd6a0ab19d3c28244d442b490fd9a4d1f79d6b",
-      "sha256:242d77c75caf47eef3856b6434ebfb3327531b4d04ed8c567b98ff298865818b",
-      "sha256:e70788a545e3a57cf066a66669acb47e22a524ddbae0c9fab54cb06becfe7e02",
-      "sha256:229bd761f8520f4dce55e0c0cf687d5670d99bd2625a59b27a50913ec667fc1b",
-      "sha256:475a4e7bc71b69a1668777d9d688c0650a4f85b07a42e85b06e5d2f0030d24c1",
-      "sha256:b3b8fba722ba90f88429ee6fd569b8c1b111ac95906267858aaf87e8ca716c75",
-      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
-      "sha256:d224910ff7c031164c1e566f190bb1dc7514e600a92c8b4d41a8dffa35b42afd",
-      "sha256:bbaa06862547bd6ee6dc5904ed745320aec9453b51ce55efdf3b51337c882b7d",
-      "sha256:41463efe77f3b0583e8140c7c065e38b2c390c8a7201e95dabb27fdac1195fa7",
-      "sha256:3f128d4232ee5cbfe4b1ea21ec5206e420cf693fb954ae6543bc60553161ad2e",
-      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
-      "sha256:2d6aa7175b28755e1d19b7442b25f447bd8fe00bb71a5c2548a00304b82722bc",
-      "sha256:0c156258022720259fe34577c54cc73a9c4752aa4902356394afaf8e67bc6c0a",
-      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
-      "sha256:fefeeabdfe962510dc5a4b94fe9f53869e4d4453b53ddd4461dd1553c178833f",
-      "sha256:ecc19d031d3e4d43d4b2ff3e1cda992e7d06db4ac0127c5ce079712938248680"
+      "sha256:39f3cdca03964fc45467b737b46c2f0699a88fbf4164b826ea42f51b63353af7"
     ]
   },
-  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-028-installer-1.0.5",
+  "artifact_source": "https://github.com/reptechwifx/wifx-voiceprobe-agent/releases/download/agent-0.9-029-installer-1.0.5",
   "corresponding_sources": [
     {
-      "name": "corresponding-sources-agent-0.9-004.tar.gz",
-      "bytes": 412831908,
-      "sha256": "707461acf9b3d00c27d2e3adb186f540f362329afe5c00b04125ffb5342b8cce"
-    },
-    {
-      "name": "corresponding-sources-rtcp-safe-0.9-017.tar.gz",
-      "bytes": 10745375,
-      "sha256": "b2a9f3e1384d46ff9f38cab1c6b3a208ae0e3971469b4444d5106f1be010113f"
-    },
-    {
-      "name": "corresponding-sources-traceroute-0.9-024.tar.gz",
-      "bytes": 85775,
-      "sha256": "957f45ede6d05dc8607da57dc12b289fbc0021e6729817b6ef09d8c29b924e07"
+      "name": "corresponding-sources-agent-0.9-029-bookworm.tar.gz",
+      "bytes": 412966444,
+      "sha256": "8dfa7f2cd8336a91decbed79ef3bde26a4c5880f391c9c58e781c7ff0deef021"
     },
     {
       "name": "corresponding-sources-arm64-0.9-026.tar.gz",
@@ -202,6 +167,16 @@
       "name": "corresponding-sources-observer-0.9-027.tar.gz",
       "bytes": 80228,
       "sha256": "824ca8940241f28434999ae5864a88424a48763b660ae805831fa74bcac767bf"
+    },
+    {
+      "name": "corresponding-sources-rtcp-safe-0.9-017.tar.gz",
+      "bytes": 10745375,
+      "sha256": "b2a9f3e1384d46ff9f38cab1c6b3a208ae0e3971469b4444d5106f1be010113f"
+    },
+    {
+      "name": "corresponding-sources-traceroute-0.9-024.tar.gz",
+      "bytes": 85775,
+      "sha256": "957f45ede6d05dc8607da57dc12b289fbc0021e6729817b6ef09d8c29b924e07"
     }
   ]
 }
